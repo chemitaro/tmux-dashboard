@@ -148,10 +148,10 @@ def test_libtmux_calls_use_cmd(monkeypatch):
     io.set_pane_title("%9", "name")
     w, h = io.window_size("dashboard:0")
 
-    # 検証
+    # 検証（select-pane は server.cmd 側で呼び出す実装）
     assert pane_calls[0] == ["capture-pane", "-p", "-e", "-S", "-5", "-E", "-1", "-t", "%9"]
     assert window_calls[0] == ["set-option", "-w", "-t", "dashboard:0", "pane-border-status", "top"]
-    assert window_calls[1] == ["select-pane", "-t", "%9", "-T", "name"]
+    assert ["select-pane", "-t", "%9", "-T", "name"] in server_calls
     assert (w, h) == (120, 50)
 
 

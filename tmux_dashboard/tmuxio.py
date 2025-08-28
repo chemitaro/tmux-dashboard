@@ -78,7 +78,9 @@ class CliDriver:
     def split_window(self, window_target: str, direction: str, percent: int) -> None:
         """指定方向に分割する。direction: 'h'（水平）/ 'v'（垂直）。"""
         flag = "-h" if direction == "h" else "-v"
-        _run_subprocess(["tmux", "split-window", flag, "-p", str(percent), "-t", window_target])
+        # pane を明示（.0）: クライアント非接続でも対象を特定できるようにする
+        target = f"{window_target}.0"
+        _run_subprocess(["tmux", "split-window", flag, "-p", str(percent), "-t", target])
 
 
 class LibtmuxDriver:
@@ -165,8 +167,8 @@ class LibtmuxDriver:
 
     def set_pane_title(self, pane_target: str, title: str) -> None:
         """ペインタイトル（pane-border-formatが#{pane_title}）を設定する。"""
-        wobj = self._get_window_by_target(window_target="fallback:0")
-        wobj.cmd("select-pane", "-t", pane_target, "-T", title)  # type: ignore[attr-defined]
+        server = self._ensure_server()
+        server.cmd("select-pane", "-t", pane_target, "-T", title)  # type: ignore[attr-defined]
 
     def list_panes(self, window_target: str) -> list[str]:
         """対象ウィンドウの pane_id 一覧（libtmuxオブジェクトから抽出）を返す。"""
