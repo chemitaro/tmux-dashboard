@@ -70,6 +70,26 @@
   - 設定: `config.tmux.driver in {"libtmux","cli"}`。
 - 主機能: `list_sessions()`, `list_windows(session)`, `list_panes(session, win)`, `display(target, fmt)`, `capture(target, opts)`, `set_window_option`, `select_pane_title` など。
 
+##### 3.1 LibtmuxDriver 詳細（Phase 8 事前整理）
+- Server 初期化: `socket_name` / `socket_path` を `libtmux.Server(**kwargs)` に反映（cfg 由来）。
+- Window 解決: `window_target='session:window_index'` から `server.sessions` → `session.windows` を走査し Window を取得。見つからない場合はフォールバック（安全策）。
+- 取得系:
+  - `window_size(target)`: Window の `window_width/window_height` 属性を参照（将来: `display-message` 併用を検討）。
+  - `list_panes(target)`: Window の `panes` から `pane_id` を抽出。
+- 実行系:
+  - `capture_pane(pane_id, H, join_wrapped)`: `pane.cmd("capture-pane", -p, -e, [-J], -S -H, -E -1, -t pane_id)`。
+  - `set_window_option(target, key, value)`: `window.cmd("set-option", -w, -t target, key, value)`（非侵襲）。
+  - `set_pane_title(pane_id, title)`: `window.cmd("select-pane", -t pane_id, -T title)`。
+  - `kill_other_panes(target)`: `window.cmd("kill-pane", -a, -t target)`。
+  - `split_window(target, dir, percent)`: `window.cmd("split-window", -h/-v, -p percent, -t target)`。
+
+##### 3.2 統合テスト方針（Phase 8）
+- 段階的統合:
+  1) FakeIO 駆動で Orchestrator のセッション増減・リサイズ再計算・タイトル設定を確認（既存+拡充）。
+  2) `libtmux` の TestServer を利用した軽量E2E（tmux の有無で skip）。
+- Skip 条件: 実行環境に tmux / libtmux が無い場合は pytest のマーカーで skip。
+- 非侵襲検証: `set-option -w` の使用、`set -g` 不使用をログ/コマンド監視で確認。
+
 #### 4. Layout
 - 役割: 列/行数の計算、分割手順の生成、差分判定。
 - 主機能: `calc_columns(W, min_tile_width)`, `calc_rows(n, columns)`, `plan_splits(columns, rows)`。

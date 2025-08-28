@@ -68,10 +68,11 @@
   - テスト: test_cli_entry.py（3件）
 
 - [ ] Phase 8. 統合（libtmux TestServer / 軽量E2E）
-  - TDD-8.1: `libtmux` の `TestServer` で独立サーバを立上げ、テスト用セッションを生成
-  - TDD-8.2: セッション追加→レイアウト拡張→タイル増加
-  - TDD-8.3: セッション削除→タイル削除→再配置
-  - TDD-8.4: リサイズで列数変動（`min_tile_width` 厳守）
+  - 前提（完了済を確認）: LibtmuxDriver の target解決・socket指定・list/capture/set/split/kill の各API（設計3.1準拠）
+  - TDD-8.1: FakeIO での拡充分統合（増→減→増、除外境界、リサイズ境界）
+  - TDD-8.2: `libtmux` TestServer による最小E2E（tmux無環境はskip）
+  - TDD-8.3: 非侵襲検証（`set-option -w` のみ、`set -g` 不使用）
+  - TDD-8.4: ログ/メトリクス（再レイアウト回数・エラー）検証
   - 実装: Orchestrator+Renderer の相互作用を実サーバに近い形で検証（既存tmuxを汚染しない）
   - フェーズ終了検証: テスト全グリーン → 提出
   - _要件: 3/4/5/6/9/10_
