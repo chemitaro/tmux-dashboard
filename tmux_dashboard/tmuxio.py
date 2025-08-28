@@ -60,6 +60,20 @@ class CliDriver:
         """ペインタイトル（pane-border-formatが#{pane_title}）を設定する。"""
         _run_subprocess(["tmux", "select-pane", "-t", pane_target, "-T", title])
 
+    def list_panes(self, window_target: str) -> list[str]:
+        """対象ウィンドウの pane_id 一覧を返す。"""
+        cp = _run_subprocess(["tmux", "list-panes", "-t", window_target, "-F", "#{pane_id}"])
+        return [l for l in cp.stdout.decode().splitlines() if l]
+
+    def kill_other_panes(self, window_target: str) -> None:
+        """対象ウィンドウで現在のペイン以外を全て閉じる。"""
+        _run_subprocess(["tmux", "kill-pane", "-a", "-t", window_target])
+
+    def split_window(self, window_target: str, direction: str, percent: int) -> None:
+        """指定方向に分割する。direction: 'h'（水平）/ 'v'（垂直）。"""
+        flag = "-h" if direction == "h" else "-v"
+        _run_subprocess(["tmux", "split-window", flag, "-p", str(percent), "-t", window_target])
+
 
 class LibtmuxDriver:
     """libtmux を用いて tmux を操作するドライバ。
@@ -114,6 +128,22 @@ class LibtmuxDriver:
         server = self._ensure_server()
         server._window.cmd("select-pane", "-t", pane_target, "-T", title)  # type: ignore[attr-defined]
 
+    def list_panes(self, window_target: str) -> list[str]:
+        """対象ウィンドウの pane_id 一覧（テストでは FakeWindow の panes）を返す。"""
+        server = self._ensure_server()
+        return list(getattr(server._window, "panes", []))  # type: ignore[attr-defined]
+
+    def kill_other_panes(self, window_target: str) -> None:
+        """対象ウィンドウで現在のペイン以外を全て閉じる。"""
+        server = self._ensure_server()
+        server._window.cmd("kill-pane", "-a", "-t", window_target)  # type: ignore[attr-defined]
+
+    def split_window(self, window_target: str, direction: str, percent: int) -> None:
+        """指定方向に分割する。direction: 'h'（水平）/ 'v'（垂直）。"""
+        server = self._ensure_server()
+        flag = "-h" if direction == "h" else "-v"
+        server._window.cmd("split-window", flag, "-p", str(percent), "-t", window_target)  # type: ignore[attr-defined]
+
 
 @dataclass
 class TmuxIO:
@@ -142,6 +172,18 @@ class TmuxIO:
     def set_pane_title(self, pane_target: str, title: str) -> None:
         """ペインタイトル（pane-border-formatが#{pane_title}）を設定する。"""
         return self.driver.set_pane_title(pane_target, title)
+
+    def list_panes(self, window_target: str) -> list[str]:
+        """対象ウィンドウの pane_id 一覧を返す。"""
+        return self.driver.list_panes(window_target)
+
+    def kill_other_panes(self, window_target: str) -> None:
+        """対象ウィンドウで現在のペイン以外を全て閉じる。"""
+        return self.driver.kill_other_panes(window_target)
+
+    def split_window(self, window_target: str, direction: str, percent: int) -> None:
+        """指定方向に分割する。direction: 'h'（水平）/ 'v'（垂直）。"""
+        return self.driver.split_window(window_target, direction, percent)
 
 
 def create_from_config(cfg) -> TmuxIO:

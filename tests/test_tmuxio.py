@@ -98,7 +98,7 @@ def test_cli_capture_and_set_options(monkeypatch):
 def test_libtmux_calls_use_cmd(monkeypatch):
     """libtmuxドライバは obj.cmd(...) を用いて必要な引数で呼び出す。"""
     from tmux_dashboard import tmuxio
-    from tmux_dashboard import config as cfg
+    from tmux_dashboard import config
 
     # フェイクのlibtmuxサーバ/ウィンドウ/ペイン
     pane_calls = []
@@ -135,7 +135,7 @@ def test_libtmux_calls_use_cmd(monkeypatch):
             return FakeCmdResult([""])
 
     # ドライバの内部オブジェクトを差し替え
-    c = cfg.load_config(None)
+    c = config.load_config(None)
     c.tmux.driver = "libtmux"
     io = tmuxio.create_from_config(c)
     io.driver._server = FakeServer()  # type: ignore[attr-defined]
@@ -151,3 +151,78 @@ def test_libtmux_calls_use_cmd(monkeypatch):
     assert window_calls[0] == ["set-option", "-w", "-t", "dashboard:0", "pane-border-status", "top"]
     assert window_calls[1] == ["select-pane", "-t", "%9", "-T", "name"]
     assert (w, h) == (120, 50)
+
+
+def test_cli_panes_and_split_commands(monkeypatch):
+    """CLIドライバの list-panes / kill-pane -a / split-window のコマンドを検証する。"""
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    issued = []
+
+    def fake_run(args, capture_output=True, check=True):
+        cmd = " ".join(args)
+        issued.append(cmd)
+        if "list-panes" in cmd:
+            return _fake_completed("%1\n%2\n")
+        return _fake_completed("")
+
+    monkeypatch.setattr(tmuxio, "_run_subprocess", fake_run)
+
+    c = config.load_config(None)
+    c.tmux.driver = "cli"
+    io = tmuxio.create_from_config(c)
+
+    panes = io.list_panes("dashboard:0")
+    assert panes == ["%1", "%2"]
+
+    io.kill_other_panes("dashboard:0")
+    assert any("kill-pane -a -t dashboard:0" in x for x in issued)
+
+    io.split_window("dashboard:0", direction="h", percent=33)
+    assert any("split-window -h -p 33 -t dashboard:0" in x for x in issued)
+    io.split_window("dashboard:0", direction="v", percent=50)
+    assert any("split-window -v -p 50 -t dashboard:0" in x for x in issued)
+
+
+def test_libtmux_panes_and_split_calls():
+    """libtmuxドライバの list_panes / kill_other_panes / split_window 呼び出しを検証する。"""
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    window_calls = []
+
+    class FakeCmdResult:
+        def __init__(self, stdout):
+            self.stdout = stdout
+
+    class FakeWindow:
+        def __init__(self):
+            self.window_width = "100"
+            self.window_height = "40"
+            self.panes = ["%A", "%B"]
+
+        def cmd(self, *args):
+            window_calls.append(list(args))
+            return FakeCmdResult([""])
+
+    class FakeServer:
+        def __init__(self):
+            self._window = FakeWindow()
+            self._pane = None
+
+    c = config.load_config(None)
+    c.tmux.driver = "libtmux"
+    io = tmuxio.create_from_config(c)
+    io.driver._server = FakeServer()  # type: ignore[attr-defined]
+
+    panes = io.list_panes("dashboard:0")
+    assert panes == ["%A", "%B"]
+
+    io.kill_other_panes("dashboard:0")
+    assert ["kill-pane", "-a", "-t", "dashboard:0"] in window_calls
+
+    io.split_window("dashboard:0", direction="h", percent=25)
+    assert ["split-window", "-h", "-p", "25", "-t", "dashboard:0"] in window_calls
+    io.split_window("dashboard:0", direction="v", percent=75)
+    assert ["split-window", "-v", "-p", "75", "-t", "dashboard:0"] in window_calls
