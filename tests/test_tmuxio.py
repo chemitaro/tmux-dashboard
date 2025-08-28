@@ -129,6 +129,8 @@ def test_libtmux_calls_use_cmd(monkeypatch):
         def __init__(self):
             self._pane = FakePane()
             self._window = FakeWindow()
+            # sessions 構造（未使用）
+            self.sessions = []
 
         def cmd(self, *args):
             server_calls.append(list(args))
@@ -151,6 +153,71 @@ def test_libtmux_calls_use_cmd(monkeypatch):
     assert window_calls[0] == ["set-option", "-w", "-t", "dashboard:0", "pane-border-status", "top"]
     assert window_calls[1] == ["select-pane", "-t", "%9", "-T", "name"]
     assert (w, h) == (120, 50)
+
+
+def test_libtmux_window_target_resolution(monkeypatch):
+    """libtmuxドライバが 'sess:0' の target から Window/Panes を解決する。"""
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    class Obj:
+        pass
+
+    class FakePane:
+        def __init__(self, pid):
+            self.pane_id = pid
+
+    class FakeWindow:
+        def __init__(self, idx, w, h, panes):
+            self.window_index = str(idx)
+            self.window_width = str(w)
+            self.window_height = str(h)
+            self.panes = [FakePane(p) for p in panes]
+
+        def cmd(self, *args):
+            return Obj()
+
+    class FakeSession:
+        def __init__(self, name, windows):
+            self.session_name = name
+            self.windows = windows
+
+    class FakeServer:
+        def __init__(self):
+            self.sessions = [FakeSession("sess", [FakeWindow(0, 80, 25, ["%X", "%Y"])])]
+
+    c = config.load_config(None)
+    c.tmux.driver = "libtmux"
+    io = tmuxio.create_from_config(c)
+    io.driver._server = FakeServer()  # type: ignore[attr-defined]
+
+    w, h = io.window_size("sess:0")
+    assert (w, h) == (80, 25)
+    assert io.list_panes("sess:0") == ["%X", "%Y"]
+
+
+def test_libtmux_respects_socket_options(monkeypatch):
+    """libtmux.Server 作成時に socket_name/path を反映する。"""
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    created = {}
+
+    class FakeLibTmux:
+        class Server:
+            def __init__(self, **kwargs):
+                created.update(kwargs)
+
+    monkeypatch.setattr(tmuxio, "libtmux", FakeLibTmux)
+
+    c = config.load_config(None)
+    c.tmux.driver = "libtmux"
+    c.tmux.socket_name = "mysock"
+    c.tmux.socket_path = "/tmp/tmux-1000/default"
+    io = tmuxio.create_from_config(c)
+    _ = io.driver._ensure_server()  # type: ignore[attr-defined]
+    assert created.get("socket_name") == "mysock"
+    assert created.get("socket_path") == "/tmp/tmux-1000/default"
 
 
 def test_cli_panes_and_split_commands(monkeypatch):
