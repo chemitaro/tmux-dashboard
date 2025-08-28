@@ -126,6 +126,11 @@ Golden Rule: "Never write a line of functional code without a failing automated 
 - **Baby Steps**: Progress in small increments
 - **Triangulation**: Generalize from multiple concrete examples
 
+## Coding Guidelines
+
+- Tests: Add Japanese docstrings to every test module and test function. State purpose, preconditions, and expected outcome in 1–3 lines. Module: scope/targets. Function: what input, what behavior, expected result.
+- TDD: Always Test-First (Red → Green → Refactor). At each phase end, run `uv run pytest`; submit only if all tests pass. On failure, fix tests/code until green.
+
 ## Implementation Prerequisites
 
 ### 95% Rule
