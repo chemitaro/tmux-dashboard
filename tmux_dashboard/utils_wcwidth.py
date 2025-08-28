@@ -18,9 +18,9 @@ CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def _iter_tokens(s: str) -> Iterable[tuple[str, bool]]:
-    """テキストとANSIシーケンスをトークン分割して返す。
+    """テキストをANSI/非ANSIトークンへ分割する。
 
-    戻り値は (token, is_ansi)。is_ansi=True は幅0。
+    戻り値: (token, is_ansi)。`is_ansi=True` は幅0として扱う。
     """
     i = 0
     n = len(s)
@@ -76,4 +76,3 @@ def ensure_reset(s: str) -> str:
     if s.endswith("\x1b[0m"):
         return s
     return s + "\x1b[0m"
-

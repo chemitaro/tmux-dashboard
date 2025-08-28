@@ -15,7 +15,7 @@ from typing import List, Tuple
 def calc_columns(window_width: int, min_tile_width: int, session_count: int) -> int:
     """列数を計算する。
 
-    columns = max(1, min(N, floor(W / min_tile_width)))
+    仕様: `max(1, min(N, floor(W / min_tile_width)))`
     """
     if min_tile_width <= 0:
         return max(1, session_count)
@@ -25,13 +25,16 @@ def calc_columns(window_width: int, min_tile_width: int, session_count: int) -> 
 
 
 def calc_rows(session_count: int, columns: int) -> int:
-    """行数を計算する（ceil(N / columns)）。"""
+    """行数を計算する（`ceil(N / columns)`）。"""
     columns = max(1, columns)
     return ceil(session_count / columns) if session_count > 0 else 1
 
 
 def percent_splits(parts: int) -> List[int]:
-    """百分率の分割配列を返す。末尾で端数を吸収し、合計100にする。"""
+    """百分率の分割配列を返す。
+
+    各要素は整数％。末尾で端数を吸収し、合計100を保証する。
+    """
     parts = max(1, parts)
     base = floor(100 / parts)
     arr = [base] * parts
@@ -41,7 +44,10 @@ def percent_splits(parts: int) -> List[int]:
 
 
 def tile_positions(n: int, columns: int, rows: int) -> List[Tuple[int, int]]:
-    """行優先（左→右、上→下）で N 個の (row, col) を返す。空セルは含めない。"""
+    """行優先（左→右、上→下）で N 個の (row, col) を返す。
+
+    空セルは生成せず、N 個に達した時点で終了する。
+    """
     out: List[Tuple[int, int]] = []
     count = 0
     for r in range(rows):
@@ -51,4 +57,3 @@ def tile_positions(n: int, columns: int, rows: int) -> List[Tuple[int, int]]:
             out.append((r, c))
             count += 1
     return out
-

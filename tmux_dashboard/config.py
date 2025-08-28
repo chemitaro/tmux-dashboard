@@ -27,6 +27,7 @@ def default_config_path() -> Path:
 
 @dataclass
 class ViewerConfig:
+    """ビューアの描画/更新に関する設定。"""
     mode: str = "capture-only"
     pipe_stream: bool = False
     join_wrapped_lines: bool = True
@@ -38,6 +39,7 @@ class ViewerConfig:
 
 @dataclass
 class TmuxConfig:
+    """tmux への接続・制御に関する設定。"""
     driver: str = "libtmux"  # or "cli"
     socket_name: t.Optional[str] = None
     socket_path: t.Optional[str] = None
@@ -45,6 +47,7 @@ class TmuxConfig:
 
 @dataclass
 class LoggingConfig:
+    """ログ出力に関する設定。"""
     level: str = "INFO"
     dir: str = "~/.local/state/tmux-dashboard"
     rotate_max_bytes: int = 10 * 1024 * 1024
@@ -53,6 +56,7 @@ class LoggingConfig:
 
 @dataclass
 class Config:
+    """ダッシュボード全体の設定。ネスト設定を含む。"""
     min_tile_width: int = 40
     poll_interval_sec: int = 2
     exclude_patterns: list[str] = field(default_factory=lambda: [r"^dashboard$"])

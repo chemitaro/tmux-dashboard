@@ -13,14 +13,16 @@ from .config import Config, expanduser_path
 
 
 def _ensure_dir(p: Path) -> None:
+    """ディレクトリ `p` を再帰的に作成（既にある場合は何もしない）。"""
     p.mkdir(parents=True, exist_ok=True)
 
 
 def setup_logging(cfg: Config) -> logging.Logger:
     """ロガーを初期化し返す。
 
-    - 既定ディレクトリ配下に `tmux-dashboard.log` を出力
-    - ローテーション: maxBytes/backupCount は設定値に従う
+    - 出力ファイル: `~/.local/state/tmux-dashboard/tmux-dashboard.log`
+    - ローテーション: `rotate_max_bytes` / `rotate_backup_count` 準拠
+    - ログレベル: `cfg.logging.level`
     """
     log_dir = expanduser_path(cfg.logging.dir)
     _ensure_dir(log_dir)
@@ -45,4 +47,3 @@ def setup_logging(cfg: Config) -> logging.Logger:
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     return logger
-
