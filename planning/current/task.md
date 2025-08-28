@@ -26,7 +26,7 @@
   - フェーズ終了検証: `uv run pytest -q` 全グリーン → 提出
   - _要件: 2/12.1_
 
-- [ ] Phase 1. 設定/ログ基盤（config.py, logging_setup.py）
+- [x] Phase 1. 設定/ログ基盤（config.py, logging_setup.py）
   - TDD-1.1: 既定値ロードのテスト（組込既定）
   - TDD-1.2: `--config` 優先・`~/.config/...` のフォールバックのテスト
   - TDD-1.3: `exclude_patterns` を `re.fullmatch` で判定するテスト（大文字小文字区別）
