@@ -21,9 +21,9 @@ def _fake_completed(stdout: str):
 def test_driver_selection(monkeypatch):
     """config.tmux.driver に応じてドライバが選択される。"""
     from tmux_dashboard import tmuxio
-    from tmux_dashboard import config as cfg
+    from tmux_dashboard import config
 
-    c = cfg.load_config(None)
+    c = config.load_config(None)
     c.tmux.driver = "cli"
     io = tmuxio.create_from_config(c)
     assert isinstance(io.driver, tmuxio.CliDriver)
@@ -36,7 +36,7 @@ def test_driver_selection(monkeypatch):
 def test_cli_list_sessions_and_window_size(monkeypatch):
     """CLIドライバはtmuxコマンドを正しく組み立てて実行する。"""
     from tmux_dashboard import tmuxio
-    from tmux_dashboard import config as cfg
+    from tmux_dashboard import config
 
     captured = []
 
@@ -51,7 +51,7 @@ def test_cli_list_sessions_and_window_size(monkeypatch):
 
     monkeypatch.setattr(tmuxio, "_run_subprocess", fake_run)
 
-    c = cfg.load_config(None)
+    c = config.load_config(None)
     c.tmux.driver = "cli"
     io = tmuxio.create_from_config(c)
 
@@ -67,7 +67,7 @@ def test_cli_list_sessions_and_window_size(monkeypatch):
 def test_cli_capture_and_set_options(monkeypatch):
     """CLIドライバの capture-pane / set-option -w / select-pane -T を検証する。"""
     from tmux_dashboard import tmuxio
-    from tmux_dashboard import config as cfg
+    from tmux_dashboard import config
 
     issued = []
 
@@ -80,7 +80,7 @@ def test_cli_capture_and_set_options(monkeypatch):
 
     monkeypatch.setattr(tmuxio, "_run_subprocess", fake_run)
 
-    c = cfg.load_config(None)
+    c = config.load_config(None)
     c.tmux.driver = "cli"
     io = tmuxio.create_from_config(c)
 
@@ -151,4 +151,3 @@ def test_libtmux_calls_use_cmd(monkeypatch):
     assert window_calls[0] == ["set-option", "-w", "-t", "dashboard:0", "pane-border-status", "top"]
     assert window_calls[1] == ["select-pane", "-t", "%9", "-T", "name"]
     assert (w, h) == (120, 50)
-

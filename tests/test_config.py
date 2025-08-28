@@ -16,9 +16,9 @@ def test_default_config_values(tmp_path, monkeypatch):
     # HOME を一時ディレクトリに
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    from tmux_dashboard import config as cfg
+    from tmux_dashboard import config
 
-    c = cfg.load_config(None)
+    c = config.load_config(None)
     assert c.min_tile_width == 40
     assert c.poll_interval_sec == 2
     assert c.pane_border_enabled is True
@@ -42,9 +42,9 @@ def test_config_path_precedence(tmp_path, monkeypatch):
         """
     ), encoding="utf-8")
 
-    from tmux_dashboard import config as cfg
+    from tmux_dashboard import config
 
-    c = cfg.load_config(str(cfg_file))
+    c = config.load_config(str(cfg_file))
     assert c.min_tile_width == 55
     assert c.viewer.max_fps == 20
 
@@ -57,36 +57,36 @@ def test_home_config_fallback(tmp_path, monkeypatch):
     default_file = default_dir / "config.yaml"
     default_file.write_text("min_tile_width: 41\n", encoding="utf-8")
 
-    from tmux_dashboard import config as cfg
+    from tmux_dashboard import config
 
-    c = cfg.load_config(None)
+    c = config.load_config(None)
     assert c.min_tile_width == 41
 
 
 def test_exclude_patterns_fullmatch(monkeypatch, tmp_path):
     """exclude_patterns は re.fullmatch で評価され、完全一致で除外される。"""
     monkeypatch.setenv("HOME", str(tmp_path))
-    from tmux_dashboard import config as cfg
+    from tmux_dashboard import config
 
-    c = cfg.load_config(None)
+    c = config.load_config(None)
     # 既定: ^dashboard$ は除外
-    assert cfg.is_session_excluded(c, "dashboard") is True
-    assert cfg.is_session_excluded(c, "dashboard2") is False
+    assert config.is_session_excluded(c, "dashboard") is True
+    assert config.is_session_excluded(c, "dashboard2") is False
 
     # カスタムパターン
     c.exclude_patterns = [r"^foo$", r"bar.*"]
-    assert cfg.is_session_excluded(c, "foo") is True
-    assert cfg.is_session_excluded(c, "barbaz") is True
-    assert cfg.is_session_excluded(c, "xbarbaz") is False
+    assert config.is_session_excluded(c, "foo") is True
+    assert config.is_session_excluded(c, "barbaz") is True
+    assert config.is_session_excluded(c, "xbarbaz") is False
 
 
 def test_logging_setup_rotating(tmp_path, monkeypatch):
     """ログはローテーション（10MB×5）で、既定ディレクトリ配下に出力される。"""
     monkeypatch.setenv("HOME", str(tmp_path))
-    from tmux_dashboard import config as cfg
+    from tmux_dashboard import config
     from tmux_dashboard import logging_setup
 
-    c = cfg.load_config(None)
+    c = config.load_config(None)
     logger = logging_setup.setup_logging(c)
 
     # ハンドラの検証
@@ -99,6 +99,5 @@ def test_logging_setup_rotating(tmp_path, monkeypatch):
             assert getattr(h, "backupCount") == c.logging.rotate_backup_count
             # 出力ディレクトリが既定パス配下
             log_path = Path(getattr(h, "baseFilename"))
-            assert str(log_path).startswith(str(Path(cfg.expanduser_path(c.logging.dir))))
+            assert str(log_path).startswith(str(Path(config.expanduser_path(c.logging.dir))))
     assert rh_found, "RotatingFileHandler should be configured"
-
