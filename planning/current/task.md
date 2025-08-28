@@ -41,6 +41,9 @@
   - TDD-2.3: 各行末 `\x1b[0m` 付与のテスト
   - 実装: `utils_wcwidth.py`
   - フェーズ終了検証: テスト全グリーン → 提出
+  
+- [x] Phase 2. ANSI幅/描画ユーティリティ（utils_wcwidth.py）
+  - 完了: テスト追加・実装・全テストGreen（13 passed）
   - _要件: 4/7.4_
 
 - [ ] Phase 3. レイアウト計算（layout.py）
