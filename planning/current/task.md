@@ -46,7 +46,7 @@
   - 完了: テスト追加・実装・全テストGreen（13 passed）
   - _要件: 4/7.4_
 
-- [ ] Phase 3. レイアウト計算（layout.py）
+- [x] Phase 3. レイアウト計算（layout.py）
   - TDD-3.1: `columns = floor(W/min_tile_width)` の検証
   - TDD-3.2: `columns = max(1, min(N, floor(W/min_tile_width)))` の検証
   - TDD-3.3: `rows = ceil(N/columns)` の検証
@@ -54,6 +54,7 @@
   - TDD-3.5: 代表ケース（A〜H）の算出結果が期待どおり（columns/rows/配分）
   - 実装: `layout.py`
   - フェーズ終了検証: テスト全グリーン → 提出
+  - 命名: モジュール短縮名（例: `as L`）は可読性低下のため禁止
   - _要件: 5.3/6_
 
 - [ ] Phase 4. tmux I/O ラッパ（tmuxio.py）
