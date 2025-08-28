@@ -1,0 +1,32 @@
+[project]
+name = "tmux-dashboard"
+version = "0.0.1"
+description = "Tmux dashboard: capture-and-render overview of sessions (left-bottom origin, color-preserving)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Project Team" }
+]
+license = { text = "Proprietary" }
+dependencies = [
+  "PyYAML>=6.0",
+  "wcwidth>=0.2.13",
+  "libtmux>=0.30.0",
+]
+
+[tool.uv]
+# uv specific settings can be added later as needed
+package = true
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["tmux_dashboard*"]
+
+[dependency-groups]
+dev = [
+  "pytest>=7.0.0",
+  "pytest-mock>=3.11.0",
+]
