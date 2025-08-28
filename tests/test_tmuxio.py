@@ -185,6 +185,18 @@ def test_libtmux_window_target_resolution(monkeypatch):
     class FakeServer:
         def __init__(self):
             self.sessions = [FakeSession("sess", [FakeWindow(0, 80, 25, ["%X", "%Y"])])]
+            self._calls = []
+
+        def cmd(self, *args):
+            self._calls.append(list(args))
+            # emulate list-panes output
+            if args and args[0] == "list-panes":
+                class R:
+                    stdout = ["%X\n%Y\n"]
+                return R()
+            class R:
+                stdout = [""]
+            return R()
 
     c = config.load_config(None)
     c.tmux.driver = "libtmux"
@@ -258,6 +270,7 @@ def test_libtmux_panes_and_split_calls():
     from tmux_dashboard import config
 
     window_calls = []
+    server_calls = []
 
     class FakeCmdResult:
         def __init__(self, stdout):
@@ -277,6 +290,17 @@ def test_libtmux_panes_and_split_calls():
         def __init__(self):
             self._window = FakeWindow()
             self._pane = None
+            self._calls = []
+
+        def cmd(self, *args):
+            server_calls.append(list(args))
+            if args and args[0] == "list-panes":
+                class R:
+                    stdout = ["%A\n%B\n"]
+                return R()
+            class R:
+                stdout = [""]
+            return R()
 
     c = config.load_config(None)
     c.tmux.driver = "libtmux"
@@ -287,9 +311,10 @@ def test_libtmux_panes_and_split_calls():
     assert panes == ["%A", "%B"]
 
     io.kill_other_panes("dashboard:0")
-    assert ["kill-pane", "-a", "-t", "dashboard:0"] in window_calls
+    # server.cmd 経由で呼び出される
+    assert ["kill-pane", "-a", "-t", "dashboard:0.0"] in server_calls
 
     io.split_window("dashboard:0", direction="h", percent=25)
-    assert ["split-window", "-h", "-p", "25", "-t", "dashboard:0"] in window_calls
+    assert ["split-window", "-h", "-p", "25", "-t", "dashboard:0.0"] in server_calls
     io.split_window("dashboard:0", direction="v", percent=75)
-    assert ["split-window", "-v", "-p", "75", "-t", "dashboard:0"] in window_calls
+    assert ["split-window", "-v", "-p", "75", "-t", "dashboard:0.0"] in server_calls

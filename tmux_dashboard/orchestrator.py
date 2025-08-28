@@ -50,17 +50,14 @@ class Orchestrator:
         return plan
 
     def apply_layout(self, window_target: str, columns: int, rows: int) -> None:
-        """簡易に分割を適用（回数と方向）。厳密なtmux分割手順は後続で最適化。"""
+        """簡易適用: 現状は縦方向に `rows*columns-1` 回分割して枚数を揃える。
+
+        将来的にグリッド分割（列→行）へ拡張する。
+        """
         self.io.kill_other_panes(window_target)
-        # 水平分割: 列数Cにするため C-1 回
-        h_perc = layout.percent_splits(columns)
-        for i in range(max(0, columns - 1)):
-            self.io.split_window(window_target, direction="h", percent=h_perc[i])
-        # 垂直分割: 各列で R-1 回（合計 C*(R-1)）
-        v_perc = layout.percent_splits(rows)
-        for _ in range(columns):
-            for i in range(max(0, rows - 1)):
-                self.io.split_window(window_target, direction="v", percent=v_perc[i])
+        target_total = max(1, rows * columns)
+        for _ in range(max(0, target_total - 1)):
+            self.io.split_window(window_target, direction="v", percent=50)
 
     def apply_titles(self, window_target: str, sessions: List[str]) -> None:
         """pane border を有効化し、pane_title にセッション名を割り当てる。"""

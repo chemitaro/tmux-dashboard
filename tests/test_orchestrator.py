@@ -85,10 +85,8 @@ def test_apply_layout_split_calls():
     c = config.load_config(None)
     o = orchestrator.Orchestrator(io=io, cfg=c)
     plan = o.compute_plan(window_target="dashboard:0")
-    # N=4, W=120, min=40 => C=3, R=2
+    # N=4, W=120, min=40 => C=3, R=2 → target_total=6 → 分割は5回（縦分割のみ）
     assert plan["columns"] == 3 and plan["rows"] == 2
     o.apply_layout(window_target="dashboard:0", columns=plan["columns"], rows=plan["rows"])
-    h = [d for d, _ in io.split_calls if d == "h"]
     v = [d for d, _ in io.split_calls if d == "v"]
-    assert len(h) == 2
-    assert len(v) == 3
+    assert len(v) == 5

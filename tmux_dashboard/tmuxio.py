@@ -171,28 +171,24 @@ class LibtmuxDriver:
         server.cmd("select-pane", "-t", pane_target, "-T", title)  # type: ignore[attr-defined]
 
     def list_panes(self, window_target: str) -> list[str]:
-        """対象ウィンドウの pane_id 一覧（libtmuxオブジェクトから抽出）を返す。"""
-        wobj = self._get_window_by_target(window_target)
-        panes = getattr(wobj, "panes", [])
-        out = []
-        for p in panes:
-            pid = getattr(p, "pane_id", None)
-            if pid:
-                out.append(pid)
-                continue
-            # テストのフェイクでは文字列IDの配列を許容
-            if isinstance(p, str) and p.startswith("%"):
-                out.append(p)
-        return out
+        """対象ウィンドウの pane_id 一覧を返す（server.cmd 経由）。"""
+        server = self._ensure_server()
+        target = f"{window_target}.0"
+        res = server.cmd("list-panes", "-t", target, "-F", "#{pane_id}")  # type: ignore[attr-defined]
+        return [l for l in "".join(res.stdout).splitlines() if l]
 
     def kill_other_panes(self, window_target: str) -> None:
-        wobj = self._get_window_by_target(window_target)
-        wobj.cmd("kill-pane", "-a", "-t", window_target)  # type: ignore[attr-defined]
+        server = self._ensure_server()
+        target = f"{window_target}.0"
+        server.cmd("select-window", "-t", window_target)  # type: ignore[attr-defined]
+        server.cmd("kill-pane", "-a", "-t", target)  # type: ignore[attr-defined]
 
     def split_window(self, window_target: str, direction: str, percent: int) -> None:
-        wobj = self._get_window_by_target(window_target)
+        server = self._ensure_server()
         flag = "-h" if direction == "h" else "-v"
-        wobj.cmd("split-window", flag, "-p", str(percent), "-t", window_target)  # type: ignore[attr-defined]
+        target = f"{window_target}.0"
+        server.cmd("select-window", "-t", window_target)  # type: ignore[attr-defined]
+        server.cmd("split-window", flag, "-p", str(percent), "-t", target)  # type: ignore[attr-defined]
 
     
 
