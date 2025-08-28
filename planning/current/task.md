@@ -17,7 +17,7 @@
 
 ## 実装タスク（フェーズ分割）
 
-- [ ] Phase 0. プロジェクト初期化（uv/構成）
+- [x] Phase 0. プロジェクト初期化（uv/構成）
   - TDD-0.1: pyproject雛形のテスト（pyproject存在検知）→ `pyproject.toml` 追加（[project], [dependency-groups]）
     - 依存: `pyyaml`, `wcwidth`, `libtmux`
     - 開発依存: `pytest`, `pytest-mock`
