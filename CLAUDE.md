@@ -48,19 +48,7 @@ Default Branch: [main/master/develop]
 ```
 
 #### Required: Use GitHub CLI
-**Use GitHub CLI (`gh` command) for all GitHub operations.**
-
-```bash
-# Pull Request Operations
-gh pr create --title "title" --body "description"
-gh pr list
-gh pr view <PR number>
-
-# Issue Operations
-gh issue create --title "title" --body "description"
-gh issue list
-gh issue view <issue number>
-```
+Use GitHub CLI (`gh` command) for all GitHub operations.
 
 ### Claude Code Specific Constraints
 
