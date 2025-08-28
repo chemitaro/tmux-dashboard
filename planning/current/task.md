@@ -58,21 +58,14 @@
   - 完了: 実装・テスト・全Green（24 passed）
   - _要件: 4/5.5/7.3/7.4_
 
-- [ ] Phase 6. オーケストレータ（orchestrator.py）
-  - TDD-6.1: セッション検出→ASCII昇順→`dashboard` 除外のテスト
-  - TDD-6.2: 対象 pane 選定（window/pane の active 優先→最小 index）
-  - TDD-6.3: `window_width/height` 変化・セッション増減でレイアウト再計算（全面再構成）のテスト
-  - TDD-6.4: pane タイトル設定（`pane-border-status top`/`pane-border-format '#{pane_title}'`/`select-pane -T`）
-  - 実装: `orchestrator.py`（ポーリング: 既定2s、再試行: 指数バックオフ）
-  - フェーズ終了検証: テスト全グリーン → 提出
+- [x] Phase 6. オーケストレータ（orchestrator.py）
+  - 完了: セッション検出/除外/ソート、レイアウト計算、分割適用、タイトル設定（27 passed）
   - _要件: 4/5/7/9/12.3_
 
-- [ ] Phase 7. CLI/エントリポイント（`python -m tmux_dashboard`）
-  - TDD-7.1: `--config` 引数のパースと既定パス解決
-  - TDD-7.2: Orchestrator 起動・終了シグナル処理（Ctrl-Cで安全停止）
-  - 実装: `__main__.py`（argparse）
-  - フェーズ終了検証: テスト全グリーン → 提出
-  - _要件: 9/12.1_
+ 
+- [x] Phase 7. CLI/エントリポイント（`python -m tmux_dashboard`）
+  - 完了: `--config`/`--once`/`--iterations`/`--window-target` 実装、Ctrl-C 安全終了
+  - テスト: test_cli_entry.py（3件）
 
 - [ ] Phase 8. 統合（libtmux TestServer / 軽量E2E）
   - TDD-8.1: `libtmux` の `TestServer` で独立サーバを立上げ、テスト用セッションを生成
