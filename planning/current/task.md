@@ -70,9 +70,16 @@
 - [ ] Phase 8. 統合（libtmux TestServer / 軽量E2E）
   - 前提（完了済を確認）: LibtmuxDriver の target解決・socket指定・list/capture/set/split/kill の各API（設計3.1準拠）
   - TDD-8.1: FakeIO での拡充分統合（増→減→増、除外境界、リサイズ境界）
-  - TDD-8.2: `libtmux` TestServer による最小E2E（tmux無環境はskip）
-  - TDD-8.3: 非侵襲検証（`set-option -w` のみ、`set -g` 不使用）
-  - TDD-8.4: ログ/メトリクス（再レイアウト回数・エラー）検証
+  - TDD-8.2: 実tmux E2E（kill-server→新規作成）
+    - ケース群:
+      - 初期セッション3件でタイトル反映（dashboard除外）
+      - セッション削除で再実行時にタイトルから消える
+      - リサイズ（79/120/160）でpane数（列×行）が再計算
+      - 多セッション（8件, W=160, min_tile_width=40 → 4×2=8）
+      - 動的追加（+gamma）/動的削除（-alpha）→再実行で反映
+  - TDD-8.3: `libtmux` TestServer による最小E2E（tmux無環境はskip）
+  - TDD-8.4: 非侵襲検証（`set-option -w` のみ、`set -g` 不使用）
+  - TDD-8.5: ログ/メトリクス（再レイアウト回数・エラー）検証
   - 実装: Orchestrator+Renderer の相互作用を実サーバに近い形で検証（既存tmuxを汚染しない）
   - フェーズ終了検証: テスト全グリーン → 提出
   - _要件: 3/4/5/6/9/10_
