@@ -1,189 +1,132 @@
-# Specification-Driven Development Template
+# tmux-dashboard
 
-仕様書駆動開発のためのプロジェクトテンプレートです。要件定義から実装報告まで、4つのドキュメントで開発プロセスを管理します。
+tmux-dashboard は、同一マシン上の tmux セッションをダッシュボード形式で一覧表示する CLI ツールです。セッション名（ASCII昇順）で並べ、各タイル（pane）に対象セッションの出力をカラーを保ったまま流し込みます。左下起点（左端 W 列 × 下端 H 行）で読みやすく俯瞰できます。
 
-## 📋 概要
+## 特徴
+- dashboard セッションを除く全 tmux セッションを自動検出（ASCII 昇順）
+- カラー保持（ANSI/TrueColor 推奨）、左下起点でクリップ表示
+- リサイズ・セッション増減を検知してレイアウト再計算
+- 非侵襲（`set-option -w` のみ使用。`set -g` は使用しません）
 
-このテンプレートは、以下の開発プロセスを標準化します：
+## 動作要件
+- OS: Linux / macOS
+- tmux: 3.2 以上を推奨
+- Python: 3.10 以上
+- パッケージ管理: [uv](https://github.com/astral-sh/uv)
 
-1. **要件定義** - 何を作るかを明確に定義
-2. **設計** - どのように実現するかを設計
-3. **実装計画** - TDDベースでタスクを計画
-4. **実装報告** - 作業記録と学びの文書化
-
-## 🚀 使い方
-
-### 1. プロジェクトの初期化
-
-このテンプレートリポジトリをクローンして、新しいプロジェクトを開始します：
-
-```bash
-# テンプレートをクローン
-git clone https://github.com/chemitaro/spec-driven-development-template.git your-project-name
-
-# プロジェクトディレクトリに移動
-cd your-project-name
-
-# Gitの履歴をリセット（新しいプロジェクトとして開始）
-rm -rf .git
-git init
-git add .
-git commit -m "Initial commit from spec-driven-development template"
-
-# 自分のリポジトリを設定
-git remote add origin https://github.com/[your-username]/[your-project-name].git
-git push -u origin main
-```
-
-または、GitHubの「Use this template」機能を使用：
-
-1. テンプレートリポジトリのGitHubページにアクセス
-2. 「Use this template」ボタンをクリック
-3. 新しいリポジトリ名を入力して作成
-4. 作成されたリポジトリをローカルにクローン
-
-### 2. プロジェクト設定
-
-以下のファイルをプロジェクトに合わせて編集します：
-
-1. **AGENTS.md** - プロジェクト概要セクションを記入
-2. **CLAUDE.md** - Claude Code固有の設定を追加（使用する場合）
-
-### 3. 開発開始
-
-#### 新しいタスクの開始
+## インストール（uv）
+1) uv をインストール
 
 ```bash
-# 要件テンプレートをコピー
-cp planning/templates/requirement.md planning/current/requirement.md
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-要件を記載し、承認を得た後：
+2) 依存を同期（初回）
 
 ```bash
-# すべてのドキュメントを準備
-cp planning/templates/*.md planning/current/
+uv sync --all-extras --dev
 ```
 
-#### 実装フロー
-
-1. **要件定義** (`requirement.md`)
-   - ユーザーストーリーを記載
-   - 受け入れ基準を定義
-   - 人間の承認を得る
-
-2. **設計** (`design.md`)
-   - アーキテクチャを設計
-   - インターフェースを定義
-   - テスト戦略を策定
-
-3. **実装** (`task.md` + `report.md`)
-   - TDDサイクルで実装
-   - 進捗をチェックボックスで管理
-   - 作業記録をリアルタイムで記録
-
-#### タスクの完了とアーカイブ
+3) テスト（任意）
 
 ```bash
-# アーカイブディレクトリを作成
-mkdir planning/completed/$(date +%Y%m%d_%H%M)_task_name/
-
-# 4つのドキュメントをアーカイブ
-cp planning/current/*.md planning/completed/$(date +%Y%m%d_%H%M)_task_name/
+uv run pytest -q
 ```
 
-## 📂 ディレクトリ構造
-
-```
-.
-├── AGENTS.md                 # AI Coding Agent向けガイド（汎用）
-├── CLAUDE.md                 # Claude Code固有設定
-├── README.md                 # このファイル
-├── planning/
-│   ├── templates/           # ドキュメントテンプレート
-│   │   ├── requirement.md   # 要件定義テンプレート
-│   │   ├── design.md        # 設計書テンプレート
-│   │   ├── task.md          # 実装計画テンプレート
-│   │   └── report.md        # 実装報告テンプレート
-│   ├── current/             # 現在作業中のドキュメント
-│   └── completed/           # アーカイブ済みドキュメント
-└── docs/                    # 追加ドキュメント（必要に応じて）
-    ├── planning-guide.md    # プランニングガイド
-    └── development-workflow.md # 開発ワークフロー
-```
-
-## 🎯 コア原則
-
-### 95% Understanding Rule
-実装前に95%の理解と95%の自信を獲得する
-
-### Test-Driven Development (TDD)
-1. **Red** - 失敗するテストを書く
-2. **Green** - テストを通す最小限のコードを書く  
-3. **Refactor** - コードを改善する
-
-### 4-Document System
-すべての開発は4つのドキュメントで管理される
-
-## 🤖 AI Coding Agent サポート
-
-このテンプレートは以下のAI Coding Agentで使用できます：
-
-- **Claude Code** (Anthropic) - `CLAUDE.md`を参照
-- **OpenAI Codex CLI** - `AGENTS.md`を参照  
-- **Windsurf** (Codeium) - `AGENTS.md`を参照
-- **Cursor** - `AGENTS.md`を参照
-- **GitHub Copilot Workspace** - `AGENTS.md`を参照
-- その他のAIアシスタント - `AGENTS.md`を参照
-
-※ `CLAUDE.md`と`AGENTS.md`は同じ内容です。異なるAI Agentが異なるファイル名を期待する場合があるため、両方のファイルを提供しています。
-
-## 📚 詳細ドキュメント
-
-- [Planning Guide](docs/planning-guide.md) - プランニングの詳細ガイド
-- [Development Workflow](docs/development-workflow.md) - 開発ワークフローの説明
-
-## 🔧 カスタマイズ
-
-### プロジェクト固有の設定
-
-1. **AGENTS.md**の`Project Overview`セクションを更新
-2. **CLAUDE.md**に環境固有の設定を追加
-3. テンプレートを必要に応じて調整（ただし基本構造は維持）
-
-### 言語対応
-
-デフォルトでは日本語ですが、以下の部分を変更可能：
-- ドキュメントの内容言語
-- コミットメッセージ
-- コメント
-
-ただし、ファイル名とディレクトリ名は英語を維持してください。
-
-## 📄 ライセンス
-
-MIT License - 自由に使用・改変可能です。
-
-## 🤝 コントリビューション
-
-改善提案やバグ報告は歓迎します。Issue や Pull Request でお知らせください。
-
-## 🔄 テンプレートの更新
-
-テンプレートが更新された場合、既存のプロジェクトに最新の改善を取り込むことができます：
+## 使い方（クイックスタート）
+1) dashboard セッションを作成
 
 ```bash
-# テンプレートリポジトリをupstreamとして追加
-git remote add template https://github.com/[your-username]/spec-driven-development-template.git
-
-# テンプレートの更新を取得
-git fetch template
-
-# 必要に応じて特定のファイルをマージ
-git checkout template/main -- AGENTS.md
-git checkout template/main -- planning/templates/
+tmux new-session -d -s dashboard
 ```
 
----
+2) ダッシュボードを起動（既定設定のまま）
 
-**Happy Spec-Driven Development! 🚀**
+```bash
+uv run python -m tmux_dashboard
+```
+
+3) 設定ファイルを使う（推奨）
+
+```bash
+cat > ~/tmux-dashboard.yaml << 'YAML'
+min_tile_width: 40
+tmux:
+  driver: libtmux   # libtmux推奨（CLIでも可）
+viewer:
+  max_fps: 30
+  wrap_mode: clip-right
+logging:
+  level: INFO
+YAML
+
+uv run python -m tmux_dashboard --config ~/tmux-dashboard.yaml
+```
+
+4) 一度だけ実行して動作を試す（デバッグ用途）
+
+```bash
+uv run python -m tmux_dashboard --once --iterations 1
+```
+
+## CLI オプション
+- `--config <path>`: 設定ファイル（YAML）。未指定時は `~/.config/tmux-dashboard/config.yaml` を探索。
+- `--window-target <session:window>`: ダッシュボード対象（既定: `dashboard:0`）。
+- `--once` `--iterations N`: N 回だけ更新して終了（デバッグ用途）。
+
+## 設定（YAML）例
+```yaml
+min_tile_width: 40
+poll_interval_sec: 2
+exclude_patterns:
+  - "^dashboard$"   # dashboard セッションは除外
+
+pane_border_enabled: true
+pane_border_format: "#{pane_title}"
+
+tmux:
+  driver: libtmux     # 推奨: libtmux / 代替: cli
+  socket_name: null
+  socket_path: null
+
+viewer:
+  mode: capture-only
+  join_wrapped_lines: true
+  max_fps: 30
+  drop_stale_frames: true
+  wrap_mode: clip-right
+  truecolor: true
+
+logging:
+  level: INFO
+  dir: ~/.local/state/tmux-dashboard
+  rotate_max_bytes: 10485760
+  rotate_backup_count: 5
+```
+
+## よく使う tmux 操作（参考）
+- dashboard 作成: `tmux new-session -d -s dashboard`
+- セッション作成: `tmux new-session -d -s alpha`
+- セッション削除: `tmux kill-session -t alpha`
+- ウィンドウリサイズ: `tmux resize-window -t dashboard:0 -x 120 -y 40`
+- サーバ全停止（リセット）: `tmux kill-server`
+
+## ドライバ（tmux 接続方式）
+- `libtmux`（推奨）: 安定した API で操作。server/window/pane の `cmd(...)` を併用可。
+- `cli`: `tmux` コマンド直叩き。headless 環境では client 未接続時の `split-window` が失敗する場合があります。
+
+## トラブルシューティング
+- pane が増えない / 分割されない:
+  - headless 環境では `split-window` が失敗する場合があります。`libtmux` ドライバを使用してください。
+  - `dashboard` 以外のセッションが存在するか確認してください。
+- 表示が崩れる / 色が残る:
+  - 端末の TrueColor 設定をご確認ください（必要に応じて 256色にフォールバック）。
+
+## テスト
+- 全体: `uv run pytest -q`
+- E2E（実 tmux 使用）: `tests/test_e2e_tmux.py`
+  - 本テストは `tmux kill-server` を行います（他の tmux セッションがある場合はご注意ください）。
+  - 環境によっては headless で `split-window` が不可なため、いくつかのケースは `xfail` となります。
+
+## ライセンス
+本リポジトリ内のコードはプロジェクト目的のために提供されています。個別ファイルのライセンス表記がある場合はそちらを優先します。
