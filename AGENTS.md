@@ -1,6 +1,7 @@
-# AI Coding Agent Development Guide
+# AI Coding Agent Instructions
 
 This file provides guidance to AI Coding Agents when working with this project.
+Both Claude Code and OpenAI Codex CLI (and other AI agents) should refer to this file.
 
 ## Project Overview
 
@@ -32,13 +33,14 @@ This project follows a strict specification-driven development approach with a 4
 
 **TDD Cycle**: Red → Green → Refactor
 - Break down task.md items → TodoWrite → Implement → Update checkboxes
+- Record all work in report.md with timestamps
 
 #### 3. Completion Phase
 
 **QA & Documentation**
 - Run tests and linters
 - Create report (`@planning/current/report.md`)
-- Archive 4 documents
+- Archive 4 documents to `planning/completed/YYYYMMDD_HHMM_task_name/`
 
 ### Important Principles
 
@@ -54,6 +56,34 @@ See: @planning/current/requirement.md
 See: @planning/current/design.md
 See: @planning/current/task.md
 See: @planning/current/report.md
+
+## Starting a New Task
+
+1. Copy requirement template to current:
+   ```bash
+   cp planning/templates/requirement.md planning/current/requirement.md
+   ```
+
+2. After requirement approval, prepare all documents:
+   ```bash
+   cp planning/templates/*.md planning/current/
+   ```
+
+3. Use TodoWrite to track implementation progress
+
+4. Archive completed work:
+   ```bash
+   mkdir planning/completed/$(date +%Y%m%d_%H%M)_task_name/
+   cp planning/current/*.md planning/completed/$(date +%Y%m%d_%H%M)_task_name/
+   ```
+
+## File References
+
+When working with planning documents, use these references:
+- `@planning/current/requirement.md`
+- `@planning/current/design.md`
+- `@planning/current/task.md`
+- `@planning/current/report.md`
 
 ## Development Commands
 
@@ -139,6 +169,93 @@ Break down the minimum units from `@planning/current/task.md` into concrete codi
 
 Each TodoWrite item should be a concrete action executable in 15-30 minutes.
 
-## Important Notes
+## Project-Specific Configuration
 
-**Follow the spec-driven development process strictly**: Always create and maintain the 4 documents throughout development.
+### Environment Variables
+
+```bash
+# List important environment variables here
+# Example:
+# NODE_ENV=development
+# DATABASE_URL=...
+```
+
+### Project Structure
+
+```
+# Define your project structure here
+# Example:
+# /src/           # Source code
+# /tests/         # Test files
+# /docs/          # Documentation
+# /planning/      # Spec-driven development documents
+```
+
+### Dependencies
+
+```bash
+# List key dependencies and their versions
+# Example:
+# Node.js >= 18.0.0
+# Python >= 3.10
+# Rust >= 1.70
+```
+
+## GitHub Operations (if applicable)
+
+If working with GitHub repositories:
+
+```yaml
+Repository: [repository-name]
+Owner: [owner]
+Default Branch: [main/master/develop]
+```
+
+### Using GitHub CLI
+```bash
+# Pull Request Operations
+gh pr create --title "title" --body "description"
+gh pr list
+gh pr view <PR number>
+
+# Issue Operations
+gh issue create --title "title" --body "description"
+gh issue list
+gh issue view <issue number>
+```
+
+## Command Execution Notes
+
+### Docker Environment (if using)
+```bash
+# Example Docker commands
+# docker compose exec [service] [command]
+# docker compose run --build --rm [test-service]
+```
+
+### Local Environment
+```bash
+# Commands run directly in the development environment
+```
+
+## AI Agent Specific Constraints
+
+1. **No Interactive Mode**: Cannot use commands with -i flag
+2. **No Auto-commit**: Only commit with explicit instructions
+3. **@ Notation Support**: Resolve @ references in project files
+4. **Parallel Execution**: Execute multiple independent tasks when possible
+
+## Effective Development Tips
+
+1. **Parallel Tool Execution**: Execute multiple independent tasks simultaneously
+2. **Pre-load Multiple Files**: Load related files in batch
+3. **Proactive TodoWrite Usage**: Visualize progress with task management
+4. **Use appropriate tools**: For complex searches requiring multiple rounds
+
+## Important Reminders
+
+- **Always follow spec-driven development**: Create and maintain 4 documents
+- **95% Understanding Rule**: Never proceed without full understanding
+- **Use TodoWrite proactively**: For task management and progress tracking
+- **Test-Driven Development**: Red → Green → Refactor cycle
+- **Document everything**: Keep report.md updated in real-time

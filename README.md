@@ -19,7 +19,7 @@
 
 ```bash
 # テンプレートをクローン
-git clone https://github.com/[your-username]/spec-driven-development-template.git your-project-name
+git clone https://github.com/chemitaro/spec-driven-development-template.git your-project-name
 
 # プロジェクトディレクトリに移動
 cd your-project-name
@@ -129,13 +129,14 @@ cp planning/current/*.md planning/completed/$(date +%Y%m%d_%H%M)_task_name/
 
 このテンプレートは以下のAI Coding Agentで使用できます：
 
-- **Claude Code** (Anthropic)
-- **Windsurf** (Codeium)
-- **Cursor**
-- **GitHub Copilot Workspace**
-- その他のAIアシスタント
+- **Claude Code** (Anthropic) - `CLAUDE.md`を参照
+- **OpenAI Codex CLI** - `AGENTS.md`を参照  
+- **Windsurf** (Codeium) - `AGENTS.md`を参照
+- **Cursor** - `AGENTS.md`を参照
+- **GitHub Copilot Workspace** - `AGENTS.md`を参照
+- その他のAIアシスタント - `AGENTS.md`を参照
 
-各Agentは`AGENTS.md`を参照して開発プロセスを理解します。
+※ `CLAUDE.md`と`AGENTS.md`は同じ内容です。異なるAI Agentが異なるファイル名を期待する場合があるため、両方のファイルを提供しています。
 
 ## 📚 詳細ドキュメント
 
