@@ -35,13 +35,6 @@
   - フェーズ終了検証: テスト全グリーン → 提出
   - _要件: 5.1/6/8/8.1/8.2_
 
-- [ ] Phase 2. ANSI幅/描画ユーティリティ（utils_wcwidth.py）
-  - TDD-2.1: ASCII/日本語/絵文字/合成文字の見かけ幅テスト（`wcwidth` 準拠）
-  - TDD-2.2: ANSI SGR を保持したまま幅算出・右端クリップ（wrap_mode="clip-right"）のテスト
-  - TDD-2.3: 各行末 `\x1b[0m` 付与のテスト
-  - 実装: `utils_wcwidth.py`
-  - フェーズ終了検証: テスト全グリーン → 提出
-  
 - [x] Phase 2. ANSI幅/描画ユーティリティ（utils_wcwidth.py）
   - 完了: テスト追加・実装・全テストGreen（13 passed）
   - _要件: 4/7.4_
@@ -57,27 +50,12 @@
   - 命名: モジュール短縮名（例: `as L`）は可読性低下のため禁止
   - _要件: 5.3/6_
 
-- [ ] Phase 4. tmux I/O ラッパ（tmuxio.py）
-  - TDD-4.1: ドライバ切替（`config.tmux.driver`=libtmux/cli）で同一インターフェースが満たされること
-  - TDD-4.2: `list_sessions()` がセッション名を列挙し `^dashboard$` を除外する（ドライバ別）
-  - TDD-4.3: `window_size()` が `window_width/height` を取得（libtmux: プロパティ、cli: display-message）
-  - TDD-4.4: `capture_pane()` が `-p -e (-J) -S -<H> -E -1` を構築（libtmux: `pane.cmd`、cli: サブプロセス）
-  - TDD-4.5: `set_window_option` が `set-option -w` のみを用いる（`set -g` 禁止）
-  - 実装: `tmuxio.py`（`LibtmuxDriver`／`CliDriver`、指数バックオフ）
-  - フェーズ終了検証: テスト全グリーン → 提出
-  - _要件: 5.1/5.2/7.1/7.2/セキュリティ・非侵襲_
-
 - [x] Phase 4. tmux I/O ラッパ（tmuxio.py）
   - 完了: ドライバ（libtmux/cli）、委譲IF、テストGreen（20 passed）
 
-- [ ] Phase 5. レンダラー中核（renderer.py）
-  - TDD-5.1: `capture` テキストを W×H に成形（左基準×下端H行、右端クリップ）
-  - TDD-5.2: 行ハッシュによる差分検出（変更行のみ更新）
-  - TDD-5.3: `max_fps=30` 上限と「古いフレーム破棄（最新優先）」のテスト（時間依存を抽象化）
-  - TDD-5.4: `truecolor` 設定と ANSI リセットの健全性
-  - TDD-5.5: `pane_height` と `capture-pane` の行数突合（オフバイワン時の安全調整）
-  - 実装: `renderer.py`（`loop_once`/`format_frame`/`diff_lines` を分離しテスタブルに）
-  - フェーズ終了検証: テスト全グリーン → 提出
+ 
+ - [x] Phase 5. レンダラー中核（renderer.py）
+  - 完了: 実装・テスト・全Green（24 passed）
   - _要件: 4/5.5/7.3/7.4_
 
 - [ ] Phase 6. オーケストレータ（orchestrator.py）
