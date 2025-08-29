@@ -15,6 +15,9 @@ def test_default_config_values(tmp_path, monkeypatch):
     """config_path未指定かつ既定パスにファイルがない場合、既定値が採用される。"""
     # HOME を一時ディレクトリに
     monkeypatch.setenv("HOME", str(tmp_path))
+    
+    # プロジェクト内設定ファイルが存在しないことにする
+    monkeypatch.setattr(Path, "exists", lambda self: False)
 
     from tmux_dashboard import config
 
@@ -52,6 +55,11 @@ def test_config_path_precedence(tmp_path, monkeypatch):
 def test_home_config_fallback(tmp_path, monkeypatch):
     """--config未指定時は ~/.config/tmux-dashboard/config.yaml があれば読み込む。"""
     monkeypatch.setenv("HOME", str(tmp_path))
+    
+    # プロジェクト内設定ファイルをスキップ
+    import os
+    monkeypatch.chdir(tmp_path)
+    
     default_dir = tmp_path / ".config" / "tmux-dashboard"
     default_dir.mkdir(parents=True, exist_ok=True)
     default_file = default_dir / "config.yaml"

@@ -28,7 +28,10 @@ def test_cli_runs_with_config_and_iterations(monkeypatch, tmp_path):
         return FakeCfg()
 
     class FakeIO:
-        pass
+        def list_sessions(self):
+            return []
+        def create_session(self, name, detached=True):
+            pass
 
     created = {"count": 0}
 
@@ -88,8 +91,14 @@ def test_cli_uses_default_when_no_config(monkeypatch):
             return {"ok": True}
 
     from tmux_dashboard import __main__ as cli
+    class FakeIO2:
+        def list_sessions(self):
+            return []
+        def create_session(self, name, detached=True):
+            pass
+    
     monkeypatch.setattr(cli, "config", type("M", (), {"load_config": staticmethod(fake_load)}))
-    monkeypatch.setattr(cli, "tmuxio", type("M", (), {"create_from_config": staticmethod(lambda _cfg: object())}))
+    monkeypatch.setattr(cli, "tmuxio", type("M", (), {"create_from_config": staticmethod(lambda _cfg: FakeIO2())}))
     monkeypatch.setattr(cli, "orchestrator", type("M", (), {"Orchestrator": FakeOrch}))
 
     rc = cli.main(["--once"])  # config未指定
@@ -109,9 +118,15 @@ def test_cli_handles_keyboard_interrupt(monkeypatch):
             rotate_backup_count = 5
 
     from tmux_dashboard import __main__ as cli
+    
+    class FakeIO3:
+        def list_sessions(self):
+            return []
+        def create_session(self, name, detached=True):
+            pass
 
     monkeypatch.setattr(cli, "config", type("M", (), {"load_config": staticmethod(lambda p: FakeCfg())}))
-    monkeypatch.setattr(cli, "tmuxio", type("M", (), {"create_from_config": staticmethod(lambda _cfg: object())}))
+    monkeypatch.setattr(cli, "tmuxio", type("M", (), {"create_from_config": staticmethod(lambda _cfg: FakeIO3())}))
 
     class FakeOrch:
         def __init__(self, io, cfg):

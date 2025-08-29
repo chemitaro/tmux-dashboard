@@ -12,6 +12,7 @@ from . import logging_setup
 from . import config  # noqa: WPS347
 from . import tmuxio  # noqa: WPS347
 from . import orchestrator  # noqa: WPS347
+from . import session_manager  # noqa: WPS347
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
         # ログ初期化（ファイル + ターミナル）
         logging_setup.setup_logging(cfg)
         io = tmuxio.create_from_config(cfg)
+        
+        # dashboardセッションを確保
+        session_manager.ensure_dashboard_session(io)
+        
         orch = orchestrator.Orchestrator(io=io, cfg=cfg)
 
         if args.once:

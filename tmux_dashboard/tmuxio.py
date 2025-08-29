@@ -170,6 +170,13 @@ class CliDriver:
     def respawn_pane(self, pane_id: str, argv: list[str]) -> None:
         """Kill current program in pane and start argv as new program (respawn-pane)."""
         _run_subprocess(["tmux", "respawn-pane", "-k", "-t", pane_id] + argv, capture_output=False)
+    
+    def create_session(self, session_name: str, detached: bool = True) -> None:
+        """新しいtmuxセッションを作成する。"""
+        args = ["tmux", "new-session", "-s", session_name]
+        if detached:
+            args.append("-d")
+        _run_subprocess(args)
 
 
 class LibtmuxDriver:
@@ -388,6 +395,14 @@ class LibtmuxDriver:
     def respawn_pane(self, pane_id: str, argv: list[str]) -> None:
         server = self._ensure_server()
         server.cmd("respawn-pane", "-k", "-t", pane_id, *argv)  # type: ignore[attr-defined]
+    
+    def create_session(self, session_name: str, detached: bool = True) -> None:
+        """新しいtmuxセッションを作成する。"""
+        server = self._ensure_server()
+        args = ["new-session", "-s", session_name]
+        if detached:
+            args.append("-d")
+        server.cmd(*args)  # type: ignore[attr-defined]
 
     
 
@@ -452,6 +467,10 @@ class TmuxIO:
     def respawn_pane(self, pane_id: str, argv: list[str]) -> None:
         """pane 内のプログラムを指定コマンドで再起動する。"""
         return self.driver.respawn_pane(pane_id, argv)
+    
+    def create_session(self, session_name: str, detached: bool = True) -> None:
+        """新しいtmuxセッションを作成する。"""
+        return self.driver.create_session(session_name, detached)
 
 
 def create_from_config(cfg) -> TmuxIO:
