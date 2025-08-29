@@ -166,6 +166,106 @@ class CliDriver:
             return None
         panes_sorted = sorted(panes, key=lambda x: (0 if x[1] == 1 else 1, x[0]))
         return panes_sorted[0][2]
+    
+    def _calculate_content_freshness(self, content: str) -> int:
+        """内容の新鮮さをスコア化。
+        
+        - ANSIエスケープシーケンスの存在
+        - プロンプトの存在
+        - 空でない行の数
+        """
+        if not content:
+            return 0
+        
+        score = 0
+        lines = content.split('\n')
+        
+        # 最後の10行を重視
+        recent_lines = lines[-10:] if len(lines) > 10 else lines
+        
+        for line in recent_lines:
+            if '\x1b[' in line:  # ANSIエスケープ
+                score += 1
+            if any(prompt in line for prompt in ['$', '>', '#', '%']):  # プロンプト
+                score += 2
+            if line.strip():  # 空でない行
+                score += 0.5
+        
+        return int(score)
+    
+    def resolve_best_pane(self, session_name: str) -> str | None:
+        """VS Codeターミナルでも確実に動作するインテリジェントpane選択。
+        
+        1. まず従来の方法を試す（パフォーマンスのため）
+        2. 内容が空の場合、全paneをスキャン
+        3. 内容の新鮮さで優先順位を決定
+        """
+        # Step 1: アクティブなwindow/paneがあるか確認
+        wins = self.list_windows_with_active(session_name)
+        has_active = any(win_active == 1 for _, win_active in wins)
+        
+        if has_active:
+            # アクティブなwindow/paneがある場合は従来の方法を使う
+            active_pane = self.resolve_active_pane(session_name)
+            if active_pane:
+                # 内容を確認
+                try:
+                    # デフォルト値でキャプチャ
+                    if self.cfg and hasattr(self.cfg, 'viewer'):
+                        multiplier = self.cfg.viewer.capture_buffer_multiplier
+                        max_lines = self.cfg.viewer.capture_buffer_max
+                    else:
+                        multiplier = 2.0
+                        max_lines = 200
+                    
+                    H = 50  # 仮の高さ
+                    capture_lines = min(int(H * multiplier), max_lines)
+                    
+                    args = ["tmux", "capture-pane", "-p", "-e", "-S", f"-{capture_lines}", "-t", active_pane]
+                    cp = _run_subprocess(args)
+                    content = cp.stdout.decode()
+                    
+                    if content and len(content.strip()) > 0:
+                        return active_pane
+                except Exception:
+                    pass
+        
+        # Step 2: 全window/paneをスキャン
+        panes_with_content = []
+        
+        wins = self.list_windows_with_active(session_name)
+        for win_idx, _ in wins:
+            panes = self.list_panes_in_window_with_active(session_name, win_idx)
+            for pane_idx, _, pane_id in panes:
+                try:
+                    # より多くの履歴を取得
+                    args = ["tmux", "capture-pane", "-p", "-e", "-S", "-1000", "-t", pane_id]
+                    cp = _run_subprocess(args)
+                    content = cp.stdout.decode()
+                    
+                    if content and len(content.strip()) > 0:
+                        freshness = self._calculate_content_freshness(content)
+                        panes_with_content.append({
+                            'pane_id': pane_id,
+                            'content_length': len(content),
+                            'freshness': freshness,
+                            'window_index': win_idx,
+                            'pane_index': pane_idx
+                        })
+                except Exception:
+                    continue
+        
+        # Step 3: 最適なpaneを選択
+        if panes_with_content:
+            # 優先順位: 新鮮さ > window_index > pane_index
+            best_pane = sorted(panes_with_content,
+                             key=lambda x: (-x['freshness'],
+                                          x['window_index'],
+                                          x['pane_index']))[0]
+            return best_pane['pane_id']
+        
+        # Step 4: フォールバック
+        return f"{session_name}:0.0"
 
     def respawn_pane(self, pane_id: str, argv: list[str]) -> None:
         """Kill current program in pane and start argv as new program (respawn-pane)."""
@@ -391,6 +491,99 @@ class LibtmuxDriver:
             return None
         panes_sorted = sorted(panes, key=lambda x: (0 if x[1] == 1 else 1, x[0]))
         return panes_sorted[0][2]
+    
+    def _calculate_content_freshness(self, content: str) -> int:
+        """内容の新鮮さをスコア化。
+        
+        - ANSIエスケープシーケンスの存在
+        - プロンプトの存在
+        - 空でない行の数
+        """
+        if not content:
+            return 0
+        
+        score = 0
+        lines = content.split('\n')
+        
+        # 最後の10行を重視
+        recent_lines = lines[-10:] if len(lines) > 10 else lines
+        
+        for line in recent_lines:
+            if '\x1b[' in line:  # ANSIエスケープ
+                score += 1
+            if any(prompt in line for prompt in ['$', '>', '#', '%']):  # プロンプト
+                score += 2
+            if line.strip():  # 空でない行
+                score += 0.5
+        
+        return int(score)
+    
+    def resolve_best_pane(self, session_name: str) -> str | None:
+        """VS Codeターミナルでも確実に動作するインテリジェントpane選択。
+        
+        1. まず従来の方法を試す（パフォーマンスのため）
+        2. 内容が空の場合、全paneをスキャン
+        3. 内容の新鮮さで優先順位を決定
+        """
+        # Step 1: アクティブなwindow/paneがあるか確認
+        wins = self.list_windows_with_active(session_name)
+        has_active = any(win_active == 1 for _, win_active in wins)
+        
+        if has_active:
+            # アクティブなwindow/paneがある場合は従来の方法を使う
+            active_pane = self.resolve_active_pane(session_name)
+            if active_pane:
+                # 内容を確認
+                try:
+                    server = self._ensure_server()
+                    # デフォルト値でキャプチャ
+                    H = 50  # 仮の高さ
+                    capture_lines = 100  # 固定値で簡略化
+                    
+                    res = server.cmd("capture-pane", "-p", "-e", "-S", f"-{capture_lines}", "-t", active_pane)
+                    content = "".join(getattr(res, "stdout", []) or [])
+                    
+                    if content and len(content.strip()) > 0:
+                        return active_pane
+                except Exception:
+                    pass
+        
+        # Step 2: 全window/paneをスキャン
+        panes_with_content = []
+        
+        wins = self.list_windows_with_active(session_name)
+        for win_idx, _ in wins:
+            panes = self.list_panes_in_window_with_active(session_name, win_idx)
+            for pane_idx, _, pane_id in panes:
+                try:
+                    server = self._ensure_server()
+                    # より多くの履歴を取得
+                    res = server.cmd("capture-pane", "-p", "-e", "-S", "-1000", "-t", pane_id)
+                    content = "".join(getattr(res, "stdout", []) or [])
+                    
+                    if content and len(content.strip()) > 0:
+                        freshness = self._calculate_content_freshness(content)
+                        panes_with_content.append({
+                            'pane_id': pane_id,
+                            'content_length': len(content),
+                            'freshness': freshness,
+                            'window_index': win_idx,
+                            'pane_index': pane_idx
+                        })
+                except Exception:
+                    continue
+        
+        # Step 3: 最適なpaneを選択
+        if panes_with_content:
+            # 優先順位: 新鮮さ > window_index > pane_index
+            best_pane = sorted(panes_with_content,
+                             key=lambda x: (-x['freshness'],
+                                          x['window_index'],
+                                          x['pane_index']))[0]
+            return best_pane['pane_id']
+        
+        # Step 4: フォールバック
+        return f"{session_name}:0.0"
 
     def respawn_pane(self, pane_id: str, argv: list[str]) -> None:
         server = self._ensure_server()
@@ -463,6 +656,10 @@ class TmuxIO:
     def resolve_active_pane(self, session_name: str) -> str | None:
         """各セッションで表示対象とする pane_id を決定する。"""
         return self.driver.resolve_active_pane(session_name)
+    
+    def resolve_best_pane(self, session_name: str) -> str | None:
+        """VS Codeターミナルでも確実に動作するインテリジェントpane選択。"""
+        return self.driver.resolve_best_pane(session_name)
 
     def respawn_pane(self, pane_id: str, argv: list[str]) -> None:
         """pane 内のプログラムを指定コマンドで再起動する。"""

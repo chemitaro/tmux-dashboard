@@ -102,10 +102,10 @@ class Orchestrator:
         # ボーダーを上部にし、タイトルは pane_title を表示
         self.io.set_window_option(window_target, "pane-border-status", "top")
         self.io.set_window_option(window_target, "pane-border-format", "#{pane_title}")
-        # 行優先（上→下、左→右）で pane を並べ替え
+        # 列優先（左→右、上→下）で pane を並べ替え
         try:
             details = self.io.list_panes_detailed(window_target)
-            panes_sorted = [pid for pid, _, _ in sorted(details, key=lambda x: (x[2], x[1]))]
+            panes_sorted = [pid for pid, _, _ in sorted(details, key=lambda x: (x[1], x[2]))]
         except Exception:
             panes_sorted = self.io.list_panes(window_target)
         for pane_id, name in zip(panes_sorted, sessions):
@@ -131,16 +131,17 @@ class Orchestrator:
             self.apply_titles(window_target, plan["sessions"])
             self._last_signature = signature
 
-        # タイルpane（行優先）とセッションのマッピングを作成
+        # タイルpane（列優先）とセッションのマッピングを作成
         try:
             details = self.io.list_panes_detailed(window_target)
-            tiles_sorted = [pid for pid, _, _ in sorted(details, key=lambda x: (x[2], x[1]))]
+            tiles_sorted = [pid for pid, _, _ in sorted(details, key=lambda x: (x[1], x[2]))]
         except Exception:
             tiles_sorted = self.io.list_panes(window_target)
 
         sessions = plan["sessions"]
         # resolve/respawn が未実装なIO（テスト用Fakeなど）では描画起動をスキップ
-        resolver = getattr(self.io, "resolve_active_pane", None)
+        # VS Code対応: resolve_best_paneを優先、なければresolve_active_paneにフォールバック
+        resolver = getattr(self.io, "resolve_best_pane", None) or getattr(self.io, "resolve_active_pane", None)
         respawner = getattr(self.io, "respawn_pane", None)
         mapping: List[Tuple[str, str, str]] = []
         if callable(resolver) and callable(respawner):

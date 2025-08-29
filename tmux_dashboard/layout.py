@@ -3,7 +3,7 @@
 機能:
 - 列/行数の決定
 - 百分率分割（末尾で端数吸収）
-- 行優先マッピング（左→右、上→下）でN個のタイル位置を返す
+- 列優先マッピング（上→下、左→右）でN個のタイル位置を返す
 """
 
 from __future__ import annotations
@@ -84,14 +84,14 @@ def progressive_percent_splits(parts: int) -> List[int]:
 
 
 def tile_positions(n: int, columns: int, rows: int) -> List[Tuple[int, int]]:
-    """行優先（左→右、上→下）で N 個の (row, col) を返す。
+    """列優先（上→下、左→右）で N 個の (row, col) を返す。
 
     空セルは生成せず、N 個に達した時点で終了する。
     """
     out: List[Tuple[int, int]] = []
     count = 0
-    for r in range(rows):
-        for c in range(columns):
+    for c in range(columns):  # 外側ループ：列
+        for r in range(rows):  # 内側ループ：行
             if count >= n:
                 return out
             out.append((r, c))
