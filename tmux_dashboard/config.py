@@ -140,8 +140,9 @@ def load_config(config_path: t.Optional[str]) -> Config:
 
     優先順位:
     1) 明示パス
-    2) 既定パス (~/.config/tmux-dashboard/config.yaml)
-    3) 組込既定
+    2) プロジェクト内 configs/dashboard.yaml
+    3) 既定パス (~/.config/tmux-dashboard/config.yaml)
+    4) 組込既定
     """
     data: dict = {}
     path: t.Optional[Path] = None
@@ -150,6 +151,14 @@ def load_config(config_path: t.Optional[str]) -> Config:
         p = Path(config_path)
         if p.exists():
             path = p
+    
+    # プロジェクト内設定ファイルをチェック
+    if path is None:
+        project_config = Path("configs/dashboard.yaml")
+        if project_config.exists():
+            path = project_config
+    
+    # ホームディレクトリの設定ファイルをチェック
     if path is None:
         p = default_config_path()
         if p.exists():

@@ -80,6 +80,65 @@ def test_exclude_patterns_fullmatch(monkeypatch, tmp_path):
     assert config.is_session_excluded(c, "xbarbaz") is False
 
 
+def test_project_config_file_priority(tmp_path, monkeypatch):
+    """プロジェクト内のconfigs/dashboard.yamlが優先される。"""
+    # HOMEを一時ディレクトリに設定
+    monkeypatch.setenv("HOME", str(tmp_path))
+    
+    # プロジェクト内設定ファイルを作成
+    project_config_dir = Path("configs")
+    project_config_dir.mkdir(exist_ok=True)
+    project_config_file = project_config_dir / "dashboard.yaml"
+    project_config_file.write_text(textwrap.dedent(
+        """
+        min_tile_width: 45
+        poll_interval_sec: 3
+        """
+    ), encoding="utf-8")
+    
+    # ホームディレクトリの設定も作成（優先度が低い）
+    home_config_dir = tmp_path / ".config" / "tmux-dashboard"
+    home_config_dir.mkdir(parents=True, exist_ok=True)
+    home_config_file = home_config_dir / "config.yaml"
+    home_config_file.write_text("min_tile_width: 50\n", encoding="utf-8")
+    
+    from tmux_dashboard import config
+    
+    # --config未指定の場合、プロジェクト内設定が優先される
+    c = config.load_config(None)
+    assert c.min_tile_width == 45  # プロジェクト内設定の値
+    assert c.poll_interval_sec == 3
+    
+    # クリーンアップ
+    project_config_file.unlink()
+    # configsディレクトリには他のファイルがあるかもしれないのでrmdirはしない
+
+
+def test_explicit_config_overrides_all(tmp_path, monkeypatch):
+    """--configで明示指定した場合、すべての設定を上書きする。"""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    
+    # プロジェクト内設定
+    project_config_dir = Path("configs")
+    project_config_dir.mkdir(exist_ok=True)
+    project_config_file = project_config_dir / "dashboard.yaml"
+    project_config_file.write_text("min_tile_width: 45\n", encoding="utf-8")
+    
+    # 明示的な設定ファイル
+    explicit_config = tmp_path / "explicit.yaml"
+    explicit_config.write_text("min_tile_width: 60\n", encoding="utf-8")
+    
+    from tmux_dashboard import config
+    
+    # --configで指定した設定が最優先
+    c = config.load_config(str(explicit_config))
+    assert c.min_tile_width == 60
+    
+    # クリーンアップ
+    project_config_file.unlink()
+    # configsディレクトリには他のファイルがあるかもしれないのでrmdirはしない
+
+
 def test_logging_setup_rotating(tmp_path, monkeypatch):
     """ログはローテーション（10MB×5）で、既定ディレクトリ配下に出力される。"""
     monkeypatch.setenv("HOME", str(tmp_path))

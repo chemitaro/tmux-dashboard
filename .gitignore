@@ -57,3 +57,6 @@ temp/
 *.tmp
 *.bak
 *.backup
+
+# Project specific
+configs/dashboard.yaml

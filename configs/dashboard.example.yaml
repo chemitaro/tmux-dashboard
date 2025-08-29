@@ -1,0 +1,76 @@
+# tmux-dashboard 設定ファイル例
+# 
+# このファイルをコピーして dashboard.yaml として使用してください：
+#   cp configs/dashboard.example.yaml configs/dashboard.yaml
+#
+# 設定の優先順位:
+# 1. --config オプションで指定したファイル
+# 2. configs/dashboard.yaml（プロジェクト内）
+# 3. ~/.config/tmux-dashboard/config.yaml（ユーザー設定）
+# 4. 組み込みデフォルト値
+
+# タイルの最小幅（文字数）
+# ウィンドウ幅をこの値で割って列数を決定します
+min_tile_width: 40
+
+# セッション検出のポーリング間隔（秒）
+poll_interval_sec: 2
+
+# 除外するセッション名のパターン（正規表現）
+# デフォルトでdashboardセッション自体は除外されます
+exclude_patterns:
+  - "^dashboard$"
+  # - "^test-.*"  # test-で始まるセッションを除外する例
+
+# ペインボーダーの設定
+pane_border_enabled: true
+pane_border_format: "#{pane_title}"
+
+# ビューア設定
+viewer:
+  # キャプチャモード（"capture-only" または "pipe_stream"）
+  mode: "capture-only"
+  
+  # パイプストリームを使用（実験的機能）
+  pipe_stream: false
+  
+  # 折り返し行を結合（-Jオプション）
+  join_wrapped_lines: true
+  
+  # 最大FPS（描画レート制限）
+  max_fps: 30
+  
+  # 古いフレームを破棄
+  drop_stale_frames: true
+  
+  # 折り返しモード
+  wrap_mode: "clip-right"
+  
+  # TrueColorサポート
+  truecolor: true
+  
+  # キャプチャバッファ設定
+  capture_buffer_multiplier: 2.0  # タイル高さの何倍を取得するか
+  capture_buffer_max: 200          # 最大取得行数
+  capture_buffer_min_extra: 20     # 最小追加行数
+
+# tmux接続設定
+tmux:
+  # ドライバ選択（"libtmux" または "cli"）
+  driver: "libtmux"
+  
+  # tmuxソケット設定（通常は不要）
+  # socket_name: "default"
+  # socket_path: "/tmp/tmux-1000/default"
+
+# ログ設定
+logging:
+  # ログレベル（DEBUG, INFO, WARNING, ERROR, CRITICAL）
+  level: "INFO"
+  
+  # ログディレクトリ
+  dir: "~/.local/state/tmux-dashboard"
+  
+  # ログファイルローテーション設定
+  rotate_max_bytes: 10485760  # 10MB
+  rotate_backup_count: 5       # 5世代保持
