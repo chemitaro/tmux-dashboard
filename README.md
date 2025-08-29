@@ -7,6 +7,7 @@ tmux-dashboard は、同一マシン上の tmux セッションをダッシュ�
 - カラー保持（ANSI/TrueColor 推奨）、左下起点でクリップ表示
 - リサイズ・セッション増減を検知してレイアウト再計算
 - 非侵襲（`set-option -w` のみ使用。`set -g` は使用しません）
+- VS Code 内蔵ターミナル対応（インテリジェント pane スキャン機能）
 
 ## 動作要件
 - OS: Linux / macOS
