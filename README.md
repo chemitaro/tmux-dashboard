@@ -1,133 +1,198 @@
 # tmux-dashboard
 
-tmux-dashboard は、同一マシン上の tmux セッションをダッシュボード形式で一覧表示する CLI ツールです。セッション名（ASCII昇順）で並べ、各タイル（pane）に対象セッションの出力をカラーを保ったまま流し込みます。左下起点（左端 W 列 × 下端 H 行）で読みやすく俯瞰できます。
+A real-time terminal dashboard that displays all tmux sessions in a beautiful tiled layout, providing a comprehensive overview of your terminal activities at a glance.
 
-## 特徴
-- dashboard セッションを除く全 tmux セッションを自動検出（ASCII 昇順）
-- カラー保持（ANSI/TrueColor 推奨）、左下起点でクリップ表示
-- リサイズ・セッション増減を検知してレイアウト再計算
-- 非侵襲（`set-option -w` のみ使用。`set -g` は使用しません）
-- VS Code 内蔵ターミナル対応（インテリジェント pane スキャン機能）
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![tmux](https://img.shields.io/badge/tmux-3.2%2B-green)
+![License](https://img.shields.io/badge/license-MIT-brightgreen)
 
-## 動作要件
-- OS: Linux / macOS
-- tmux: 3.2 以上を推奨
-- Python: 3.10 以上
-- パッケージ管理: [uv](https://github.com/astral-sh/uv)
+## Features
 
-## インストール（uv）
-1) uv をインストール
+- **Automatic Session Detection**: Discovers and displays all tmux sessions (except the dashboard itself)
+- **Tiled Layout**: Intelligently arranges sessions in a responsive grid layout
+- **Real-time Updates**: Continuously monitors and updates session content
+- **Color Preservation**: Maintains ANSI colors and TrueColor formatting from original sessions
+- **Column-Major Ordering**: Sessions are arranged vertically (top-to-bottom, then left-to-right) for better readability
+- **VS Code Terminal Support**: Intelligent pane scanning ensures proper display even from VS Code integrated terminals
+- **Non-invasive**: Uses window-specific settings only (`-w`), never modifies global tmux configuration
+- **Bottom-Aligned Display**: Shows the most recent output (bottom lines) of each session
+- **Auto-resizing**: Automatically adjusts layout when terminal is resized or sessions are added/removed
+- **Session Auto-creation**: Dashboard session is created automatically if it doesn't exist
 
+## Requirements
+
+- **OS**: Linux or macOS
+- **tmux**: Version 3.2 or higher
+- **Python**: Version 3.10 or higher
+
+## Installation
+
+### Using uv (Recommended)
+
+1. Install [uv](https://github.com/astral-sh/uv) (fast Python package manager):
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-2) 依存を同期（初回）
-
+2. Clone the repository:
 ```bash
-uv sync --all-extras --dev
+git clone https://github.com/chemitaro/tmux-dashboard.git
+cd tmux-dashboard
 ```
 
-3) テスト（任意）
-
+3. Install dependencies:
 ```bash
-uv run pytest -q
+uv sync
 ```
 
-## 使い方（クイックスタート）
-1) dashboard セッションを作成
+### Using pip
 
 ```bash
-tmux new-session -d -s dashboard
+git clone https://github.com/chemitaro/tmux-dashboard.git
+cd tmux-dashboard
+pip install -r requirements.txt
 ```
 
-2) ダッシュボードを起動（既定設定のまま）
+## Quick Start
 
+Simply run the dashboard:
 ```bash
+# Using uv
 uv run python -m tmux_dashboard
+
+# Using pip
+python -m tmux_dashboard
 ```
 
-3) 設定ファイルを使う（推奨）
+The dashboard will:
+1. Automatically create a tmux session named "dashboard" if it doesn't exist
+2. Display all other tmux sessions in a tiled layout
+3. Update in real-time as you work
 
+To attach to the dashboard:
 ```bash
-cat > ~/tmux-dashboard.yaml << 'YAML'
-min_tile_width: 40
-tmux:
-  driver: libtmux   # libtmux推奨（CLIでも可）
-viewer:
-  max_fps: 30
-  wrap_mode: clip-right
-logging:
-  level: INFO
-YAML
-
-uv run python -m tmux_dashboard --config ~/tmux-dashboard.yaml
+tmux attach -t dashboard
 ```
 
-4) 一度だけ実行して動作を試す（デバッグ用途）
+## Configuration
 
+### Configuration File Locations
+
+The dashboard looks for configuration in the following order:
+1. Command-line specified: `--config /path/to/config.yaml`
+2. Project directory: `configs/dashboard.yaml`
+3. User home: `~/.config/tmux-dashboard/config.yaml`
+4. Built-in defaults
+
+### Configuration Options
+
+Create a configuration file based on the example:
 ```bash
-uv run python -m tmux_dashboard --once --iterations 1
+cp configs/dashboard.example.yaml configs/dashboard.yaml
 ```
 
-## CLI オプション
-- `--config <path>`: 設定ファイル（YAML）。未指定時は `~/.config/tmux-dashboard/config.yaml` を探索。
-- `--window-target <session:window>`: ダッシュボード対象（既定: `dashboard:0`）。
-- `--once` `--iterations N`: N 回だけ更新して終了（デバッグ用途）。
+Key configuration options:
 
-## 設定（YAML）例
 ```yaml
+# Minimum width for each tile (in columns)
 min_tile_width: 40
+
+# Session detection interval (seconds)
 poll_interval_sec: 2
+
+# Exclude specific sessions from display
 exclude_patterns:
-  - "^dashboard$"   # dashboard セッションは除外
+  - "^dashboard$"
+  - "^temp-.*"
 
-pane_border_enabled: true
-pane_border_format: "#{pane_title}"
-
-tmux:
-  driver: libtmux     # 推奨: libtmux / 代替: cli
-  socket_name: null
-  socket_path: null
-
+# Display settings
 viewer:
-  mode: capture-only
-  join_wrapped_lines: true
+  capture_buffer_multiplier: 2.0
+  capture_buffer_max: 200
+  capture_buffer_min_extra: 20
   max_fps: 30
-  drop_stale_frames: true
-  wrap_mode: clip-right
   truecolor: true
 
+# Logging
 logging:
-  level: INFO
-  dir: ~/.local/state/tmux-dashboard
-  rotate_max_bytes: 10485760
-  rotate_backup_count: 5
+  level: "INFO"
+  dir: "~/.local/state/tmux-dashboard"
 ```
 
-## よく使う tmux 操作（参考）
-- dashboard 作成: `tmux new-session -d -s dashboard`
-- セッション作成: `tmux new-session -d -s alpha`
-- セッション削除: `tmux kill-session -t alpha`
-- ウィンドウリサイズ: `tmux resize-window -t dashboard:0 -x 120 -y 40`
-- サーバ全停止（リセット）: `tmux kill-server`
+## Usage Examples
 
-## ドライバ（tmux 接続方式）
-- `libtmux`（推奨）: 安定した API で操作。server/window/pane の `cmd(...)` を併用可。
-- `cli`: `tmux` コマンド直叩き。headless 環境では client 未接続時の `split-window` が失敗する場合があります。
+### Basic Usage
+```bash
+# Start the dashboard
+uv run python -m tmux_dashboard
 
-## トラブルシューティング
-- pane が増えない / 分割されない:
-  - headless 環境では `split-window` が失敗する場合があります。`libtmux` ドライバを使用してください。
-  - `dashboard` 以外のセッションが存在するか確認してください。
-- 表示が崩れる / 色が残る:
-  - 端末の TrueColor 設定をご確認ください（必要に応じて 256色にフォールバック）。
+# Start with custom config
+uv run python -m tmux_dashboard --config ~/my-dashboard.yaml
 
-## テスト
-- 全体: `uv run pytest -q`
-- E2E（実 tmux 使用）: `tests/test_e2e_tmux.py`
-  - 本テストは `tmux kill-server` を行います（他の tmux セッションがある場合はご注意ください）。
-  - 環境によっては headless で `split-window` が不可なため、いくつかのケースは `xfail` となります。
+# Run for a specific number of iterations (useful for testing)
+uv run python -m tmux_dashboard --iterations 5
+```
 
-## ライセンス
-本リポジトリ内のコードはプロジェクト目的のために提供されています。個別ファイルのライセンス表記がある場合はそちらを優先します。
+### Working with the Dashboard
+```bash
+# Create new tmux sessions - they'll automatically appear in the dashboard
+tmux new-session -s development
+tmux new-session -s monitoring
+tmux new-session -s logs
+
+# The dashboard will display them in alphabetical order, arranged in columns
+```
+
+## Advanced Features
+
+### Session Ordering
+Sessions are displayed in **column-major order** (vertically), sorted alphabetically:
+```
++----------+----------+----------+
+| alpha    | gamma    | epsilon  |
++----------+----------+----------+
+| beta     | delta    |          |
++----------+----------+----------+
+```
+
+### VS Code Terminal Compatibility
+The dashboard intelligently detects and properly displays sessions created from VS Code's integrated terminal, even when VS Code is not in focus.
+
+### Smart Content Capture
+- Captures sufficient scrollback buffer to ensure smooth display
+- Shows the bottom-most lines of each session (most recent output)
+- Preserves ANSI color codes and formatting
+
+## Troubleshooting
+
+### Dashboard appears empty
+- Ensure other tmux sessions are running
+- Check that sessions aren't excluded by patterns in your config
+- Verify tmux version is 3.2 or higher: `tmux -V`
+
+### Sessions from VS Code don't display correctly
+- The dashboard automatically handles VS Code terminals
+- If issues persist, ensure VS Code terminal is using tmux properly
+
+### Performance issues with many sessions
+- Adjust `poll_interval_sec` in configuration (higher = less CPU usage)
+- Reduce `max_fps` for smoother but less frequent updates
+- Increase `min_tile_width` to show fewer tiles
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Built with Python and the power of tmux
+- Inspired by the need for better terminal session management
+- Special thanks to the tmux and Python communities
+
+## Support
+
+If you encounter any issues or have questions, please [open an issue](https://github.com/chemitaro/tmux-dashboard/issues) on GitHub.
