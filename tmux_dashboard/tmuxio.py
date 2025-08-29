@@ -29,6 +29,10 @@ def _run_subprocess(args, capture_output=True, check=True):
 class CliDriver:
     """tmux コマンドを直接実行するドライバ。依存が少なく移植性が高い。"""
 
+    def __init__(self, cfg=None):
+        """設定を受け取って初期化。"""
+        self.cfg = cfg
+
     def list_sessions(self) -> list[str]:
         """セッション名一覧を返す（ASCII昇順ソートは呼び出し側で行う）。"""
         cp = _run_subprocess(["tmux", "list-sessions", "-F", "#{session_name}"])
@@ -51,7 +55,24 @@ class CliDriver:
         return int(w), int(h)
 
     def capture_pane(self, pane_target: str, H: int, join_wrapped: bool) -> str:
-        """対象ペインの下端から H 行を取得する（ANSI保持）。"""
+        """対象ペインから適切な量の履歴を含めて取得（ANSI保持）。
+        
+        ダッシュボードのタイル高さ(H)に応じて、履歴バッファから
+        十分な行数を取得し、format_linesで最後のH行を表示。
+        """
+        # スマートな取得行数の計算（設定値を使用）
+        if self.cfg and hasattr(self.cfg, 'viewer'):
+            multiplier = self.cfg.viewer.capture_buffer_multiplier
+            max_lines = self.cfg.viewer.capture_buffer_max
+            min_extra = self.cfg.viewer.capture_buffer_min_extra
+        else:
+            # デフォルト値
+            multiplier = 2.0
+            max_lines = 200
+            min_extra = 20
+        
+        capture_lines = min(max(int(H * multiplier), H + min_extra), max_lines)
+        
         args = [
             "tmux",
             "capture-pane",
@@ -60,7 +81,8 @@ class CliDriver:
         ]
         if join_wrapped:
             args.append("-J")
-        args += ["-S", f"-{H}", "-E", "-1", "-t", pane_target]
+        # 履歴バッファの終端からcapture_lines行を取得
+        args += ["-S", f"-{capture_lines}", "-t", pane_target]
         cp = _run_subprocess(args)
         return cp.stdout.decode()
 
@@ -105,6 +127,50 @@ class CliDriver:
             out.append((pid, int(left), int(top)))
         return out
 
+    # ---- new helpers for renderer orchestration ----
+    def list_windows_with_active(self, session_name: str) -> list[tuple[int, int]]:
+        """Return (window_index, window_active) list for a session."""
+        cp = _run_subprocess(["tmux", "list-windows", "-t", session_name, "-F", "#{window_index} #{window_active}"])
+        out: list[tuple[int, int]] = []
+        for line in cp.stdout.decode().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            wi, act = line.split()
+            out.append((int(wi), int(act)))
+        return out
+
+    def list_panes_in_window_with_active(self, session_name: str, window_index: int) -> list[tuple[int, int, str]]:
+        """Return (pane_index, pane_active, pane_id) list for a session:window."""
+        target = f"{session_name}:{window_index}"
+        cp = _run_subprocess(["tmux", "list-panes", "-t", target, "-F", "#{pane_index} #{pane_active} #{pane_id}"])
+        out: list[tuple[int, int, str]] = []
+        for line in cp.stdout.decode().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            pi, act, pid = line.split()
+            out.append((int(pi), int(act), pid))
+        return out
+
+    def resolve_active_pane(self, session_name: str) -> str | None:
+        """Pick a deterministic pane_id per spec: active window/pane else minimum index."""
+        wins = self.list_windows_with_active(session_name)
+        if not wins:
+            return None
+        # prefer active, else min index
+        wins_sorted = sorted(wins, key=lambda x: (0 if x[1] == 1 else 1, x[0]))
+        win_idx = wins_sorted[0][0]
+        panes = self.list_panes_in_window_with_active(session_name, win_idx)
+        if not panes:
+            return None
+        panes_sorted = sorted(panes, key=lambda x: (0 if x[1] == 1 else 1, x[0]))
+        return panes_sorted[0][2]
+
+    def respawn_pane(self, pane_id: str, argv: list[str]) -> None:
+        """Kill current program in pane and start argv as new program (respawn-pane)."""
+        _run_subprocess(["tmux", "respawn-pane", "-k", "-t", pane_id] + argv, capture_output=False)
+
 
 class LibtmuxDriver:
     """libtmux を用いて tmux を操作するドライバ。
@@ -113,11 +179,12 @@ class LibtmuxDriver:
     - 対象ウィンドウは `session:window_index` の target 文字列から解決。
     - セーフティ: sessions から解決できない場合は `_server._window` にフォールバック。
     """
-    def __init__(self, socket_name: str | None = None, socket_path: str | None = None):
+    def __init__(self, cfg=None, socket_name: str | None = None, socket_path: str | None = None):
         try:
             import libtmux  # noqa: F401
         except Exception:  # pragma: no cover - import error handled lazily in tests
             pass
+        self.cfg = cfg
         self._server = None
         self._socket_name = socket_name
         self._socket_path = socket_path
@@ -184,17 +251,41 @@ class LibtmuxDriver:
         return w, h
 
     def capture_pane(self, pane_target: str, H: int, join_wrapped: bool) -> str:
-        """対象ペインの下端から H 行を取得する（ANSI保持）。"""
+        """対象ペインから適切な量の履歴を含めて取得（ANSI保持）。
+        
+        ダッシュボードのタイル高さ(H)に応じて、履歴バッファから
+        十分な行数を取得し、format_linesで最後のH行を表示。
+        """
+        # スマートな取得行数の計算（設定値を使用）
+        if self.cfg and hasattr(self.cfg, 'viewer'):
+            multiplier = self.cfg.viewer.capture_buffer_multiplier
+            max_lines = self.cfg.viewer.capture_buffer_max
+            min_extra = self.cfg.viewer.capture_buffer_min_extra
+        else:
+            # デフォルト値
+            multiplier = 2.0
+            max_lines = 200
+            min_extra = 20
+        
+        capture_lines = min(max(int(H * multiplier), H + min_extra), max_lines)
+        
         server = self._ensure_server()
         # Windowに紐づくpaneではなく直接pane_id指定のため、pane側に委譲
         pane = getattr(server, "_pane", None)
+        
+        # -Jオプションの処理を追加
+        base_args = ["capture-pane", "-p", "-e"]
+        if join_wrapped:
+            base_args.append("-J")
+        # 履歴バッファの終端からcapture_lines行を取得
+        base_args += ["-S", f"-{capture_lines}", "-t", pane_target]
+        
         if pane is None:
             # 最低限のフォールバック: window.cmd で実行（Fakeでの検証用）
             wobj = self._get_window_by_target("fallback:0")
-            res = wobj.cmd("capture-pane", "-p", "-e", "-S", f"-{H}", "-E", "-1", "-t", pane_target)  # type: ignore[attr-defined]
+            res = wobj.cmd(*base_args)  # type: ignore[attr-defined]
         else:
-            args = ["capture-pane", "-p", "-e", "-S", f"-{H}", "-E", "-1", "-t", pane_target]
-            res = pane.cmd(*args)  # type: ignore[attr-defined]
+            res = pane.cmd(*base_args)  # type: ignore[attr-defined]
         return "".join(res.stdout)
 
     def set_window_option(self, window_target: str, key: str, value: str) -> None:
@@ -256,6 +347,48 @@ class LibtmuxDriver:
             out.append((pid, int(left), int(top)))
         return out
 
+    # ---- new helpers for renderer orchestration ----
+    def list_windows_with_active(self, session_name: str) -> list[tuple[int, int]]:
+        server = self._ensure_server()
+        res = server.cmd("list-windows", "-t", session_name, "-F", "#{window_index} #{window_active}")  # type: ignore[attr-defined]
+        out: list[tuple[int, int]] = []
+        for line in getattr(res, "stdout", []) or []:
+            text = str(line).strip()
+            if not text:
+                continue
+            wi, act = text.split()
+            out.append((int(wi), int(act)))
+        return out
+
+    def list_panes_in_window_with_active(self, session_name: str, window_index: int) -> list[tuple[int, int, str]]:
+        server = self._ensure_server()
+        target = f"{session_name}:{window_index}"
+        res = server.cmd("list-panes", "-t", target, "-F", "#{pane_index} #{pane_active} #{pane_id}")  # type: ignore[attr-defined]
+        out: list[tuple[int, int, str]] = []
+        for line in getattr(res, "stdout", []) or []:
+            text = str(line).strip()
+            if not text:
+                continue
+            pi, act, pid = text.split()
+            out.append((int(pi), int(act), pid))
+        return out
+
+    def resolve_active_pane(self, session_name: str) -> str | None:
+        wins = self.list_windows_with_active(session_name)
+        if not wins:
+            return None
+        wins_sorted = sorted(wins, key=lambda x: (0 if x[1] == 1 else 1, x[0]))
+        win_idx = wins_sorted[0][0]
+        panes = self.list_panes_in_window_with_active(session_name, win_idx)
+        if not panes:
+            return None
+        panes_sorted = sorted(panes, key=lambda x: (0 if x[1] == 1 else 1, x[0]))
+        return panes_sorted[0][2]
+
+    def respawn_pane(self, pane_id: str, argv: list[str]) -> None:
+        server = self._ensure_server()
+        server.cmd("respawn-pane", "-k", "-t", pane_id, *argv)  # type: ignore[attr-defined]
+
     
 
 
@@ -311,12 +444,21 @@ class TmuxIO:
         """pane の (id, left, top) を返す。"""
         return self.driver.list_panes_detailed(window_target)
 
+    # ---- new helpers ----
+    def resolve_active_pane(self, session_name: str) -> str | None:
+        """各セッションで表示対象とする pane_id を決定する。"""
+        return self.driver.resolve_active_pane(session_name)
+
+    def respawn_pane(self, pane_id: str, argv: list[str]) -> None:
+        """pane 内のプログラムを指定コマンドで再起動する。"""
+        return self.driver.respawn_pane(pane_id, argv)
+
 
 def create_from_config(cfg) -> TmuxIO:
     """設定に基づきドライバを選び `TmuxIO` を構築する。"""
     drv_name = (getattr(cfg, "tmux", None) and cfg.tmux.driver) or "libtmux"
     if drv_name == "cli":
-        driver = CliDriver()
+        driver = CliDriver(cfg=cfg)
     else:
-        driver = LibtmuxDriver(socket_name=getattr(cfg.tmux, "socket_name", None), socket_path=getattr(cfg.tmux, "socket_path", None))
+        driver = LibtmuxDriver(cfg=cfg, socket_name=getattr(cfg.tmux, "socket_name", None), socket_path=getattr(cfg.tmux, "socket_path", None))
     return TmuxIO(driver=driver)

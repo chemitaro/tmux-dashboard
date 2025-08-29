@@ -43,6 +43,46 @@ def percent_splits(parts: int) -> List[int]:
     return arr
 
 
+def progressive_percent_splits(parts: int) -> List[int]:
+    """tmux split-windowコマンド用の累進的なパーセント配列を返す。
+    
+    各分割ステップで、残りのペインを均等に分割するための
+    正しいパーセンテージを計算する。
+    
+    Args:
+        parts: 分割する総数（2以上）
+    
+    Returns:
+        各分割ステップで使用するパーセンテージのリスト
+        （最後の分割は不要なので、長さは parts-1）
+    
+    Examples:
+        >>> progressive_percent_splits(2)
+        [50]  # 2分割: 100%を50%で分割
+        
+        >>> progressive_percent_splits(3)
+        [33, 50]  # 3分割: 100%を33%、残り67%を50%で分割
+        
+        >>> progressive_percent_splits(4)
+        [25, 33, 50]  # 4分割: 100%を25%、75%を33%、50%を50%で分割
+        
+        >>> progressive_percent_splits(5)
+        [20, 25, 33, 50]  # 5分割: 1/5, 1/4, 1/3, 1/2
+    """
+    if parts <= 1:
+        return []
+    
+    percentages = []
+    for i in range(parts - 1):
+        # i番目の分割では、残り(parts - i)個に分割する
+        # そのうち1個を新しいペインにするので、1/(parts - i)
+        remaining_parts = parts - i
+        percent = 100 // remaining_parts
+        percentages.append(percent)
+    
+    return percentages
+
+
 def tile_positions(n: int, columns: int, rows: int) -> List[Tuple[int, int]]:
     """行優先（左→右、上→下）で N 個の (row, col) を返す。
 

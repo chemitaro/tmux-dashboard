@@ -16,6 +16,12 @@ def test_cli_runs_with_config_and_iterations(monkeypatch, tmp_path):
 
     class FakeCfg:
         poll_interval_sec = 0
+        
+        class logging:
+            dir = "~/.local/state/tmux-dashboard"
+            level = "INFO"
+            rotate_max_bytes = 10485760
+            rotate_backup_count = 5
 
     def fake_load(path):
         load_args["path"] = path
@@ -63,6 +69,12 @@ def test_cli_uses_default_when_no_config(monkeypatch):
 
     class FakeCfg:
         poll_interval_sec = 0
+        
+        class logging:
+            dir = "~/.local/state/tmux-dashboard"
+            level = "INFO"
+            rotate_max_bytes = 10485760
+            rotate_backup_count = 5
 
     def fake_load(path):
         called["path"] = path
@@ -89,6 +101,12 @@ def test_cli_handles_keyboard_interrupt(monkeypatch):
     """KeyboardInterrupt を受けたら 0 終了する。"""
     class FakeCfg:
         poll_interval_sec = 0
+        
+        class logging:
+            dir = "~/.local/state/tmux-dashboard"
+            level = "INFO"
+            rotate_max_bytes = 10485760
+            rotate_backup_count = 5
 
     from tmux_dashboard import __main__ as cli
 

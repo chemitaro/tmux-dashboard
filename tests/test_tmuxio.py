@@ -85,7 +85,8 @@ def test_cli_capture_and_set_options(monkeypatch):
     io = tmuxio.create_from_config(c)
 
     out = io.capture_pane("%1", H=10, join_wrapped=True)
-    assert "capture-pane -p -e -J -S -10 -E -1 -t %1" in issued[0]
+    # H=10の場合、デフォルト設定では max(10*2, 10+20) = 30行を取得
+    assert "capture-pane -p -e -J -S -30 -t %1" in issued[0]
     assert "hello" in out
 
     io.set_window_option("dashboard:0", "pane-border-status", "top")
@@ -149,7 +150,8 @@ def test_libtmux_calls_use_cmd(monkeypatch):
     w, h = io.window_size("dashboard:0")
 
     # 検証（select-pane は server.cmd 側で呼び出す実装）
-    assert pane_calls[0] == ["capture-pane", "-p", "-e", "-S", "-5", "-E", "-1", "-t", "%9"]
+    # H=5の場合、デフォルト設定では max(5*2, 5+20) = 25行を取得
+    assert pane_calls[0] == ["capture-pane", "-p", "-e", "-S", "-25", "-t", "%9"]
     assert window_calls[0] == ["set-option", "-w", "-t", "dashboard:0", "pane-border-status", "top"]
     assert ["select-pane", "-t", "%9", "-T", "name"] in server_calls
     assert (w, h) == (120, 50)
@@ -192,7 +194,7 @@ def test_libtmux_window_target_resolution(monkeypatch):
             # emulate list-panes output
             if args and args[0] == "list-panes":
                 class R:
-                    stdout = ["%X\n%Y\n"]
+                    stdout = ["%X", "%Y"]
                 return R()
             class R:
                 stdout = [""]
@@ -296,7 +298,7 @@ def test_libtmux_panes_and_split_calls():
             server_calls.append(list(args))
             if args and args[0] == "list-panes":
                 class R:
-                    stdout = ["%A\n%B\n"]
+                    stdout = ["%A", "%B"]
                 return R()
             class R:
                 stdout = [""]

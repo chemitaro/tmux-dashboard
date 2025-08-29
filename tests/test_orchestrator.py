@@ -101,3 +101,29 @@ def test_apply_layout_split_calls():
     v = [d for d, _ in io.split_calls if d == "v"]
     assert len(h) == 2
     assert len(v) >= 1
+
+
+def test_apply_layout_uses_progressive_percentages():
+    """新しいprogressive_percent_splitsが使用されることを検証する。"""
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    # 3列に分割する場合
+    io = FakeIO(sessions=["a", "b", "c"], width=120, height=40, panes=["%1", "%2", "%3"])
+    c = config.load_config(None)
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+    
+    # 3セッション、W=120、min_tile_width=40 => C=3、R=1
+    plan = o.compute_plan(window_target="dashboard:0")
+    assert plan["columns"] == 3
+    assert plan["rows"] == 1
+    
+    io.split_calls = []  # リセット
+    o.apply_layout(window_target="dashboard:0", columns=3, rows=1)
+    
+    # 水平分割のパーセンテージを確認
+    # progressive_percent_splits(3) = [33, 50]
+    h_calls = [(d, p) for d, p in io.split_calls if d == "h"]
+    assert len(h_calls) == 2
+    assert h_calls[0][1] == 33  # 1回目: 100%を33%で分割
+    assert h_calls[1][1] == 50  # 2回目: 残り67%を50%で分割

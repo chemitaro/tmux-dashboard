@@ -35,6 +35,10 @@ class ViewerConfig:
     drop_stale_frames: bool = True
     wrap_mode: str = "clip-right"
     truecolor: bool = True
+    # キャプチャバッファ設定
+    capture_buffer_multiplier: float = 2.0  # タイル高さの何倍を取得するか
+    capture_buffer_max: int = 200           # 最大取得行数
+    capture_buffer_min_extra: int = 20      # 最小追加行数
 
 
 @dataclass
