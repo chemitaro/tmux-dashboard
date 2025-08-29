@@ -7,6 +7,8 @@ CLI引数を解釈し、将来的に Orchestrator の起動を担う。
 import argparse
 import sys
 import time
+from datetime import datetime
+from . import logging_setup
 from . import config  # noqa: WPS347
 from . import tmuxio  # noqa: WPS347
 from . import orchestrator  # noqa: WPS347
@@ -40,19 +42,27 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         cfg = config.load_config(args.config if getattr(args, "config", None) else None)
+        # ログ初期化（ファイル + ターミナル）
+        logging_setup.setup_logging(cfg)
         io = tmuxio.create_from_config(cfg)
         orch = orchestrator.Orchestrator(io=io, cfg=cfg)
 
         if args.once:
             n = max(1, int(args.iterations))
-            for _ in range(n):
+            for i in range(n):
+                # ループ検出用の時刻出力
+                print(f"[tmux-dashboard] loop={i+1}/{n} at {datetime.now().isoformat()}", flush=True)
                 orch.run_once(window_target=args.window_target)
                 if cfg.poll_interval_sec:
                     time.sleep(0)
             return 0
 
         # 通常の無限ループ（Ctrl-Cで終了）
+        i = 0
         while True:
+            i += 1
+            # ループ検出用の時刻出力
+            print(f"[tmux-dashboard] loop={i} at {datetime.now().isoformat()}", flush=True)
             orch.run_once(window_target=args.window_target)
             time.sleep(max(0.0, float(cfg.poll_interval_sec)))
     except KeyboardInterrupt:

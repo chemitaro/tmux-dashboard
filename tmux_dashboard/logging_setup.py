@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from logging.handlers import RotatingFileHandler
+import sys
 from pathlib import Path
 
 from .config import Config, expanduser_path
@@ -46,4 +47,13 @@ def setup_logging(cfg: Config) -> logging.Logger:
     )
     handler.setFormatter(formatter)
     logger.addHandler(handler)
+
+    # ターミナル出力（StreamHandler）を追加（常時可視化）
+    sh = logging.StreamHandler(stream=sys.stdout)
+    sh.setLevel(logger.level)
+    sh.setFormatter(formatter)
+    logger.addHandler(sh)
+
+    # 祖先ロガーへ伝搬しない
+    logger.propagate = False
     return logger

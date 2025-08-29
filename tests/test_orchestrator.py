@@ -41,6 +41,15 @@ class FakeIO:
     def kill_other_panes(self, window_target: str):
         self.kill_calls += 1
 
+    # 追加: orchestrator の新APIに合わせたダミー
+    def list_panes_detailed(self, window_target: str):
+        # 簡易に固定の3カラム（left: 0,40,80）を想定、topは0
+        return [(pid, idx * 40, 0) for idx, pid in enumerate(self._panes[:3])]
+    def select_pane(self, pane_id: str):
+        return None
+    def split_pane(self, pane_id: str, direction: str, percent: int):
+        self.split_calls.append((direction, percent))
+
 
 def test_scan_sort_exclude_and_titles_and_layout():
     """セッションはASCII昇順で`dashboard`除外、columns/rows計算とタイトル設定を行う。"""
@@ -85,8 +94,10 @@ def test_apply_layout_split_calls():
     c = config.load_config(None)
     o = orchestrator.Orchestrator(io=io, cfg=c)
     plan = o.compute_plan(window_target="dashboard:0")
-    # N=4, W=120, min=40 => C=3, R=2 → target_total=6 → 分割は5回（縦分割のみ）
+    # N=4, W=120, min=40 => C=3, R=2 → 水平分割(C-1)=2, 垂直分割(列ごと)=配分に応じて≥1
     assert plan["columns"] == 3 and plan["rows"] == 2
     o.apply_layout(window_target="dashboard:0", columns=plan["columns"], rows=plan["rows"])
+    h = [d for d, _ in io.split_calls if d == "h"]
     v = [d for d, _ in io.split_calls if d == "v"]
-    assert len(v) == 5
+    assert len(h) == 2
+    assert len(v) >= 1

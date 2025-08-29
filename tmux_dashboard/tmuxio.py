@@ -17,6 +17,12 @@ except Exception:  # pragma: no cover
 
 
 def _run_subprocess(args, capture_output=True, check=True):
+    # 低コストのコマンドトレース（DEBUG）
+    try:
+        import logging
+        logging.getLogger("tmux_dashboard.tmuxio").debug("run: %s", " ".join(map(str, args)))
+    except Exception:
+        pass
     return subprocess.run(args, capture_output=capture_output, check=check)
 
 
@@ -82,6 +88,23 @@ class CliDriver:
         target = f"{window_target}.0"
         _run_subprocess(["tmux", "split-window", flag, "-p", str(percent), "-t", target])
 
+    def select_pane(self, pane_id: str) -> None:
+        _run_subprocess(["tmux", "select-pane", "-t", pane_id])
+
+    def split_pane(self, pane_id: str, direction: str, percent: int) -> None:
+        flag = "-h" if direction == "h" else "-v"
+        _run_subprocess(["tmux", "split-window", flag, "-p", str(percent), "-t", pane_id])
+
+    def list_panes_detailed(self, window_target: str) -> list[tuple[str, int, int]]:
+        cp = _run_subprocess(["tmux", "list-panes", "-t", window_target, "-F", "#{pane_id} #{pane_left} #{pane_top}"])
+        out: list[tuple[str, int, int]] = []
+        for line in cp.stdout.decode().splitlines():
+            if not line.strip():
+                continue
+            pid, left, top = line.strip().split()
+            out.append((pid, int(left), int(top)))
+        return out
+
 
 class LibtmuxDriver:
     """libtmux を用いて tmux を操作するドライバ。
@@ -134,9 +157,23 @@ class LibtmuxDriver:
         return getattr(server, "_window", None)
 
     def list_sessions(self) -> list[str]:
-        """セッション名一覧を返す。"""
+        """セッション名一覧を返す（cmd 経由で最新を取得）。"""
         server = self._ensure_server()
-        return [s.session_name for s in getattr(server, "sessions", [])]
+        try:
+            logger = __import__("logging").getLogger("tmux_dashboard.tmuxio")
+            logger.debug("libtmux: list-sessions -F #{session_name}")
+        except Exception:
+            logger = None
+        res = server.cmd("list-sessions", "-F", "#{session_name}")  # type: ignore[attr-defined]
+        # libtmux の stdout は既に行ごとのリストになっている前提。join しない。
+        items = []
+        for s in getattr(res, "stdout", []) or []:
+            name = str(s).strip()
+            if name:
+                items.append(name)
+        if logger:
+            logger.debug("sessions=%s", items)
+        return items
 
     def window_size(self, window_target: str) -> Tuple[int, int]:
         """ウィンドウの幅/高さを返す（テストでは FakeWindow の値を使用）。"""
@@ -175,7 +212,12 @@ class LibtmuxDriver:
         server = self._ensure_server()
         target = f"{window_target}.0"
         res = server.cmd("list-panes", "-t", target, "-F", "#{pane_id}")  # type: ignore[attr-defined]
-        return [l for l in "".join(res.stdout).splitlines() if l]
+        out: list[str] = []
+        for s in getattr(res, "stdout", []) or []:
+            pid = str(s).strip()
+            if pid:
+                out.append(pid)
+        return out
 
     def kill_other_panes(self, window_target: str) -> None:
         server = self._ensure_server()
@@ -189,6 +231,30 @@ class LibtmuxDriver:
         target = f"{window_target}.0"
         server.cmd("select-window", "-t", window_target)  # type: ignore[attr-defined]
         server.cmd("split-window", flag, "-p", str(percent), "-t", target)  # type: ignore[attr-defined]
+
+    def select_pane(self, pane_id: str) -> None:
+        server = self._ensure_server()
+        server.cmd("select-pane", "-t", pane_id)  # type: ignore[attr-defined]
+
+    def split_pane(self, pane_id: str, direction: str, percent: int) -> None:
+        server = self._ensure_server()
+        flag = "-h" if direction == "h" else "-v"
+        server.cmd("split-window", flag, "-p", str(percent), "-t", pane_id)  # type: ignore[attr-defined]
+
+    def list_panes_detailed(self, window_target: str) -> list[tuple[str, int, int]]:
+        server = self._ensure_server()
+        res = server.cmd("list-panes", "-t", window_target, "-F", "#{pane_id} #{pane_left} #{pane_top}")  # type: ignore[attr-defined]
+        out: list[tuple[str, int, int]] = []
+        for line in getattr(res, "stdout", []) or []:
+            text = str(line).strip()
+            if not text:
+                continue
+            parts = text.split()
+            if len(parts) != 3:
+                continue
+            pid, left, top = parts
+            out.append((pid, int(left), int(top)))
+        return out
 
     
 
@@ -232,6 +298,18 @@ class TmuxIO:
     def split_window(self, window_target: str, direction: str, percent: int) -> None:
         """指定方向に分割する。direction: 'h'（水平）/ 'v'（垂直）。"""
         return self.driver.split_window(window_target, direction, percent)
+
+    def select_pane(self, pane_id: str) -> None:
+        """対象の pane を選択する。"""
+        return self.driver.select_pane(pane_id)
+
+    def split_pane(self, pane_id: str, direction: str, percent: int) -> None:
+        """対象の pane を分割する。"""
+        return self.driver.split_pane(pane_id, direction, percent)
+
+    def list_panes_detailed(self, window_target: str) -> list[tuple[str, int, int]]:
+        """pane の (id, left, top) を返す。"""
+        return self.driver.list_panes_detailed(window_target)
 
 
 def create_from_config(cfg) -> TmuxIO:
