@@ -1,33 +1,48 @@
 # tmux-dashboard
 
-A real-time terminal dashboard that displays all tmux sessions in a beautiful tiled layout, providing a comprehensive overview of your terminal activities at a glance.
+Transform your tmux experience with a real-time, bird's-eye view of all your terminal sessions. Never lose track of what's happening across your development environment again.
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![tmux](https://img.shields.io/badge/tmux-3.2%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
 
-## Features
+## Why tmux-dashboard?
 
-- **Automatic Session Detection**: Discovers and displays all tmux sessions (except the dashboard itself)
-- **Tiled Layout**: Intelligently arranges sessions in a responsive grid layout
-- **Real-time Updates**: Continuously monitors and updates session content
-- **Color Preservation**: Maintains ANSI colors and TrueColor formatting from original sessions
-- **Column-Major Ordering**: Sessions are arranged vertically (top-to-bottom, then left-to-right) for better readability
-- **VS Code Terminal Support**: Intelligent pane scanning ensures proper display even from VS Code integrated terminals
-- **Non-invasive**: Uses window-specific settings only (`-w`), never modifies global tmux configuration
-- **Bottom-Aligned Display**: Shows the most recent output (bottom lines) of each session
-- **Auto-resizing**: Automatically adjusts layout when terminal is resized or sessions are added/removed
-- **Session Auto-creation**: Dashboard session is created automatically if it doesn't exist
+If you're a developer who:
+- Works with multiple tmux sessions simultaneously
+- Struggles to keep track of various background processes
+- Needs to monitor logs, builds, and tests across different sessions
+- Uses VS Code's integrated terminal with tmux
+- Wants a clean, organized view of your entire terminal workspace
 
-## Requirements
+Then tmux-dashboard is built for you. It provides a **live, tiled dashboard** that displays all your tmux sessions at once, updating in real-time as your processes run.
 
-- **OS**: Linux or macOS
-- **tmux**: Version 3.2 or higher
-- **Python**: Version 3.10 or higher
+## Key Features
+
+### 🎯 Smart Session Display
+- **Automatic Detection**: Discovers all tmux sessions instantly (excluding the dashboard itself)
+- **Intelligent Content Capture**: Shows the most recent output (bottom lines) - what matters most
+- **Column-Major Layout**: Sessions arranged vertically for natural reading flow
+- **Alphabetical Ordering**: Predictable, organized session arrangement
+
+### 🎨 Visual Excellence
+- **Color Preservation**: Full ANSI and TrueColor support - your terminal colors remain intact
+- **Clean Borders**: Each session clearly labeled with its name
+- **Responsive Grid**: Automatically adjusts when you resize your terminal
+- **Smart Clipping**: Content fits perfectly within each tile
+
+### 💪 Robust Design
+- **VS Code Compatible**: Works seamlessly with VS Code's integrated terminal
+- **Non-Invasive**: Never modifies your global tmux configuration
+- **Auto-Creation**: Dashboard session created automatically on startup
+- **Real-Time Updates**: Configurable refresh rate (default: 2 seconds)
+- **Efficient**: Smart buffering and frame dropping for smooth performance
+
+## How It Works
+
+tmux-dashboard creates a special tmux session called "dashboard" that acts as your command center. Each tile in the dashboard is a live view of another tmux session, continuously updated using tmux's `capture-pane` functionality. The tool uses intelligent pane scanning to ensure content is displayed even when sessions are inactive (like in VS Code terminals).
 
 ## Installation
-
-### Using uv (Recommended)
 
 1. Install [uv](https://github.com/astral-sh/uv) (fast Python package manager):
 ```bash
@@ -45,73 +60,83 @@ cd tmux-dashboard
 uv sync
 ```
 
-### Using pip
-
-```bash
-git clone https://github.com/chemitaro/tmux-dashboard.git
-cd tmux-dashboard
-pip install -r requirements.txt
-```
-
 ## Quick Start
 
-Simply run the dashboard:
+Simply run:
 ```bash
-# Using uv
 uv run python -m tmux_dashboard
-
-# Using pip
-python -m tmux_dashboard
 ```
 
 The dashboard will:
-1. Automatically create a tmux session named "dashboard" if it doesn't exist
-2. Display all other tmux sessions in a tiled layout
-3. Update in real-time as you work
+1. Create a "dashboard" tmux session automatically
+2. Detect all your existing tmux sessions
+3. Display them in a beautiful tiled layout
+4. Update continuously as you work
 
-To attach to the dashboard:
+To view the dashboard:
 ```bash
 tmux attach -t dashboard
 ```
 
-## Configuration
+## Real-World Usage
 
-### Configuration File Locations
-
-The dashboard looks for configuration in the following order:
-1. Command-line specified: `--config /path/to/config.yaml`
-2. Project directory: `configs/dashboard.yaml`
-3. User home: `~/.config/tmux-dashboard/config.yaml`
-4. Built-in defaults
-
-### Configuration Options
-
-Create a configuration file based on the example:
+### Development Workflow
 ```bash
-cp configs/dashboard.example.yaml configs/dashboard.yaml
+# Start your development sessions
+tmux new-session -d -s backend 'npm run dev'
+tmux new-session -d -s frontend 'yarn start'
+tmux new-session -d -s tests 'pytest --watch'
+tmux new-session -d -s logs 'tail -f app.log'
+
+# Launch the dashboard to monitor everything
+uv run python -m tmux_dashboard
+
+# Attach to see all sessions at once
+tmux attach -t dashboard
 ```
 
-Key configuration options:
+### Session Layout Example
+```
+┌─────────────┬─────────────┬─────────────┐
+│   backend   │   frontend  │    logs     │
+│             │             │             │
+│ Server      │ webpack 5.1 │ [INFO] App  │
+│ running on  │ compiled    │ started     │
+│ port 3000   │ successfully│ [DEBUG] ... │
+├─────────────┼─────────────┼─────────────┤
+│   tests     │             │             │
+│             │             │             │
+│ ......✓     │             │             │
+│ 15 passed   │             │             │
+└─────────────┴─────────────┴─────────────┘
+```
+
+## Configuration
+
+Create a custom configuration file:
+```bash
+cp configs/dashboard.example.yaml ~/.config/tmux-dashboard/config.yaml
+```
+
+### Key Settings
 
 ```yaml
-# Minimum width for each tile (in columns)
+# Minimum width for each tile (columns)
 min_tile_width: 40
 
-# Session detection interval (seconds)
+# Update interval (seconds)
 poll_interval_sec: 2
 
-# Exclude specific sessions from display
+# Exclude patterns (regex)
 exclude_patterns:
-  - "^dashboard$"
-  - "^temp-.*"
+  - "^dashboard$"    # Don't show the dashboard itself
+  - "^temp-.*"       # Ignore temporary sessions
 
-# Display settings
+# Display optimization
 viewer:
-  capture_buffer_multiplier: 2.0
-  capture_buffer_max: 200
-  capture_buffer_min_extra: 20
-  max_fps: 30
-  truecolor: true
+  max_fps: 30                      # Smooth updates without overload
+  capture_buffer_multiplier: 2.0   # Buffer size for scrollback
+  truecolor: true                  # Enable 24-bit colors
 
 # Logging
 logging:
@@ -119,80 +144,79 @@ logging:
   dir: "~/.local/state/tmux-dashboard"
 ```
 
-## Usage Examples
-
-### Basic Usage
-```bash
-# Start the dashboard
-uv run python -m tmux_dashboard
-
-# Start with custom config
-uv run python -m tmux_dashboard --config ~/my-dashboard.yaml
-
-# Run for a specific number of iterations (useful for testing)
-uv run python -m tmux_dashboard --iterations 5
-```
-
-### Working with the Dashboard
-```bash
-# Create new tmux sessions - they'll automatically appear in the dashboard
-tmux new-session -s development
-tmux new-session -s monitoring
-tmux new-session -s logs
-
-# The dashboard will display them in alphabetical order, arranged in columns
-```
-
 ## Advanced Features
 
-### Session Ordering
-Sessions are displayed in **column-major order** (vertically), sorted alphabetically:
-```
-+----------+----------+----------+
-| alpha    | gamma    | epsilon  |
-+----------+----------+----------+
-| beta     | delta    |          |
-+----------+----------+----------+
-```
+### Column-Major Ordering
+Sessions are arranged top-to-bottom, then left-to-right:
+- Better for reading terminal output
+- Groups related sessions naturally
+- Maintains spatial consistency
 
-### VS Code Terminal Compatibility
-The dashboard intelligently detects and properly displays sessions created from VS Code's integrated terminal, even when VS Code is not in focus.
+### VS Code Terminal Support
+The dashboard uses intelligent pane scanning to detect and display content from VS Code integrated terminals, even when VS Code is minimized or unfocused. This ensures you never miss important output.
 
-### Smart Content Capture
-- Captures sufficient scrollback buffer to ensure smooth display
-- Shows the bottom-most lines of each session (most recent output)
-- Preserves ANSI color codes and formatting
+### Performance Optimization
+- **Smart Buffering**: Captures just enough scrollback for smooth display
+- **Frame Dropping**: Maintains responsiveness under high load
+- **Differential Updates**: Only redraws changed content
+- **Configurable FPS**: Balance between smoothness and CPU usage
+
+## Command-Line Options
+
+```bash
+# Use custom configuration
+uv run python -m tmux_dashboard --config ~/my-config.yaml
+
+# Run specific iterations (for testing)
+uv run python -m tmux_dashboard --once --iterations 5
+
+# Target different window
+uv run python -m tmux_dashboard --window-target dashboard:1
+```
 
 ## Troubleshooting
 
-### Dashboard appears empty
-- Ensure other tmux sessions are running
-- Check that sessions aren't excluded by patterns in your config
-- Verify tmux version is 3.2 or higher: `tmux -V`
+### Dashboard is empty
+- Ensure you have other tmux sessions running
+- Check exclude patterns in your configuration
+- Verify: `tmux list-sessions`
 
-### Sessions from VS Code don't display correctly
-- The dashboard automatically handles VS Code terminals
-- If issues persist, ensure VS Code terminal is using tmux properly
-
-### Performance issues with many sessions
-- Adjust `poll_interval_sec` in configuration (higher = less CPU usage)
-- Reduce `max_fps` for smoother but less frequent updates
+### High CPU usage
+- Increase `poll_interval_sec` (e.g., to 5 seconds)
+- Reduce `max_fps` (e.g., to 10)
 - Increase `min_tile_width` to show fewer tiles
+
+### Colors not displaying correctly
+- Ensure your terminal supports TrueColor
+- Try setting `truecolor: false` in config for 256-color mode
+- Check your TERM environment variable
+
+## Why Choose tmux-dashboard?
+
+- **Zero Learning Curve**: If you know tmux, you're ready to go
+- **Non-Intrusive**: Doesn't modify your tmux configuration or workflow
+- **Lightweight**: Pure Python with minimal dependencies
+- **Reliable**: Robust error handling and automatic recovery
+- **Open Source**: MIT licensed, free to use and modify
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Feel free to:
+- Report bugs or request features via [Issues](https://github.com/chemitaro/tmux-dashboard/issues)
+- Submit pull requests with improvements
+- Share your use cases and configuration tips
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - Copyright (c) 2025 chemitaro
 
 ## Acknowledgments
 
-- Built with Python and the power of tmux
-- Inspired by the need for better terminal session management
-- Special thanks to the tmux and Python communities
+Built with ❤️ for the terminal enthusiast community. Special thanks to:
+- The tmux maintainers for an incredible terminal multiplexer
+- The Python community for excellent libraries
+- All contributors and users who make this project better
 
-## Support
+---
 
-If you encounter any issues or have questions, please [open an issue](https://github.com/chemitaro/tmux-dashboard/issues) on GitHub.
+**Start monitoring your tmux sessions like a pro. Install tmux-dashboard today!**
