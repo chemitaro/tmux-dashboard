@@ -49,6 +49,9 @@ class FakeIO:
         return None
     def split_pane(self, pane_id: str, direction: str, percent: int):
         self.split_calls.append((direction, percent))
+    def list_panes_with_titles(self, window_target: str):
+        # テスト用: pane IDとタイトルを返す
+        return [(pid, f"session_{idx}") for idx, pid in enumerate(self._panes)]
 
 
 def test_scan_sort_exclude_and_titles_and_layout():

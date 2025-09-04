@@ -277,6 +277,26 @@ class CliDriver:
         if detached:
             args.append("-d")
         _run_subprocess(args)
+    
+    def list_panes_with_titles(self, window_target: str) -> list[tuple[str, str]]:
+        """指定ウィンドウのペインIDとタイトルのリストを返す。
+        
+        Returns:
+            [(pane_id, pane_title), ...]
+        """
+        cp = _run_subprocess(["tmux", "list-panes", "-t", window_target, "-F", "#{pane_id} #{pane_title}"])
+        out: list[tuple[str, str]] = []
+        for line in cp.stdout.decode().splitlines():
+            if not line.strip():
+                continue
+            parts = line.strip().split(' ', 1)
+            if len(parts) == 2:
+                pane_id, title = parts
+                out.append((pane_id, title))
+            elif len(parts) == 1:
+                # タイトルが空の場合
+                out.append((parts[0], ""))
+        return out
 
 
 class LibtmuxDriver:
@@ -596,6 +616,29 @@ class LibtmuxDriver:
         if detached:
             args.append("-d")
         server.cmd(*args)  # type: ignore[attr-defined]
+    
+    def list_panes_with_titles(self, window_target: str) -> list[tuple[str, str]]:
+        """指定ウィンドウのペインIDとタイトルのリストを返す。
+        
+        Returns:
+            [(pane_id, pane_title), ...]
+        """
+        window = self._get_window_by_target(window_target)
+        if not window:
+            return []
+        
+        out: list[tuple[str, str]] = []
+        panes = getattr(window, "panes", [])
+        for pane in panes:
+            pane_id = getattr(pane, "id", "")
+            # libtmuxではpane_titleプロパティがない場合があるので、cmdで取得
+            try:
+                res = pane.cmd("display-message", "-p", "#{pane_title}")  # type: ignore[attr-defined]
+                title = str(getattr(res, "stdout", [""])[0]).strip() if hasattr(res, "stdout") else ""
+            except Exception:
+                title = getattr(pane, "pane_title", "")
+            out.append((pane_id, title))
+        return out
 
     
 
@@ -668,6 +711,10 @@ class TmuxIO:
     def create_session(self, session_name: str, detached: bool = True) -> None:
         """新しいtmuxセッションを作成する。"""
         return self.driver.create_session(session_name, detached)
+    
+    def list_panes_with_titles(self, window_target: str) -> list[tuple[str, str]]:
+        """指定ウィンドウのペインIDとタイトルのリストを返す。"""
+        return self.driver.list_panes_with_titles(window_target)
 
 
 def create_from_config(cfg) -> TmuxIO:

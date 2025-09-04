@@ -112,6 +112,40 @@ class Orchestrator:
             panes_sorted = self.io.list_panes(window_target)
         for pane_id, name in zip(panes_sorted, sessions):
             self.io.set_pane_title(pane_id, name)
+    
+    def check_pane_integrity(self, window_target: str) -> bool:
+        """ペインタイトルの整合性を確認し、不一致なら再レイアウトが必要。
+        
+        Returns:
+            True: 再レイアウトが必要（不一致が検出された）
+            False: 整合性が取れている
+        """
+        logger = logging.getLogger("tmux_dashboard.orchestrator")
+        
+        # 期待されるセッション名の集合
+        expected_sessions = set(self.scan_sessions())
+        
+        # 実際のペインタイトルの集合
+        try:
+            panes_with_titles = self.io.list_panes_with_titles(window_target)
+            actual_titles = set(title for _, title in panes_with_titles)
+        except Exception as e:
+            logger.warning("Failed to get pane titles: %s", e)
+            # エラー時は整合性チェックをスキップ
+            return False
+        
+        # 集合が一致しない場合は再レイアウトが必要
+        if expected_sessions != actual_titles:
+            logger.warning(
+                "Pane integrity check failed. Expected: %s, Actual: %s",
+                sorted(expected_sessions),
+                sorted(actual_titles)
+            )
+            # _last_signatureをリセットして次回強制的に再レイアウト
+            self._last_signature = None
+            return True
+        
+        return False
 
     def run_once(self, window_target: str = "dashboard:0") -> Dict:
         """1サイクル: 計画→分割→タイトル設定→計画返却。
@@ -153,9 +187,12 @@ class Orchestrator:
             logger.error("Failed to compute plan: %s", e)
             return {"columns": 0, "rows": 0, "sessions": [], "positions": []}
 
+        # ペイン整合性チェック（タイトルが期待と異なる場合は再レイアウト）
+        integrity_failed = self.check_pane_integrity(window_target)
+        
         # レイアウト差分判定（columns/rows/sessions のシグネチャ）
         signature = (plan["columns"], plan["rows"], tuple(plan["sessions"]))
-        need_layout = signature != self._last_signature
+        need_layout = (signature != self._last_signature) or integrity_failed
         if need_layout:
             # 分割とタイトル設定（ログは tmuxio 側で DEBUG 出力）
             self.apply_layout(window_target, plan["columns"], plan["rows"])

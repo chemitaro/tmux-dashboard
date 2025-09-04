@@ -90,7 +90,7 @@
   - フェーズ終了検証: テスト全グリーン → 提出
   - _要件: 8/12.1_
 
-- [ ] Phase 10. ペイン整合性監視機能（要件 5.8 対応）
+- [x] Phase 10. ペイン整合性監視機能（要件 5.8 対応）
   - TDD-10.1: tmuxio拡張 - `list_panes_with_titles()` メソッド追加
     - CliDriver: `tmux list-panes -t dashboard:0 -F "#{pane_id} #{pane_title}"` 実行とパース
     - LibtmuxDriver: Window.panes からタイトル情報取得
