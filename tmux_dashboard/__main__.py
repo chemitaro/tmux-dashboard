@@ -57,7 +57,14 @@ def main(argv: list[str] | None = None) -> int:
             for i in range(n):
                 # ループ検出用の時刻出力
                 print(f"[tmux-dashboard] loop={i+1}/{n} at {datetime.now().isoformat()}", flush=True)
-                orch.run_once(window_target=args.window_target)
+                try:
+                    session_manager.ensure_dashboard_session(io)
+                    orch.run_once(window_target=args.window_target)
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger("tmux_dashboard.main")
+                    logger.error("Error in test loop iteration %d: %s", i+1, e)
+                    # テストモードでもエラーが発生しても継続
                 if cfg.poll_interval_sec:
                     time.sleep(0)
             return 0
@@ -68,7 +75,18 @@ def main(argv: list[str] | None = None) -> int:
             i += 1
             # ループ検出用の時刻出力
             print(f"[tmux-dashboard] loop={i} at {datetime.now().isoformat()}", flush=True)
-            orch.run_once(window_target=args.window_target)
+            
+            # dashboardセッションの存在確認と必要に応じた再作成
+            # run_once内でも処理されるが、メインループでもチェック
+            try:
+                session_manager.ensure_dashboard_session(io)
+                orch.run_once(window_target=args.window_target)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger("tmux_dashboard.main")
+                logger.error("Error in main loop iteration %d: %s", i, e)
+                # エラーが発生しても継続
+            
             time.sleep(max(0.0, float(cfg.poll_interval_sec)))
     except KeyboardInterrupt:
         return 0

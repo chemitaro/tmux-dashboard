@@ -42,7 +42,7 @@
 ### 主要コンポーネント
 
 #### 1. Orchestrator
-- 役割: セッション検出、ウィンドウ寸法取得、レイアウト計算、pane 構成、Renderer のライフサイクル管理。
+- 役割: セッション検出、ウィンドウ寸法取得、レイアウト計算、pane 構成、Renderer のライフサイクル管理、dashboardセッション管理。
 - 主機能:
   - `scan_sessions()`：`tmux list-sessions` → 除外 → ASCII 昇順。
   - `resolve_target_pane(session)`：ウィンドウ/ペイン選定ルールで対象 pane_id を取得。
@@ -51,6 +51,7 @@
   - `reconcile_layout()`：構成差分があれば pane 再構成（初版は全面再構成）。
   - `apply_pane_titles()`：`set-option -w` と `select-pane -T`。
   - `spawn_renderers()`：各タイルで Renderer 起動（対象 pane を引数）。
+  - `handle_dashboard_recovery()`：dashboardセッション消失時の検出と自動再作成。
   - ポーリングループ：`poll_interval_sec` 間隔で再評価（≤3秒反映）。
 
 #### 2. Renderer（TerminalDriver=ansi 既定）
@@ -103,6 +104,12 @@
 
 #### 7. utils_wcwidth
 - 役割: `wcwidth` ベースの幅計算、ANSI 除去/保持ヘルパ、行末 `\x1b[0m` 付与。
+
+#### 8. SessionManager
+- 役割: dashboardセッションの存在確認と自動作成。
+- 主機能:
+  - `ensure_dashboard_session(io)`：セッション一覧を確認、不在時は `tmux new-session -d -s dashboard` で作成。
+  - 新規作成時は True、既存時は False を返却。
 
 ### インターフェース定義（擬似）
 ```python
@@ -194,6 +201,11 @@ LayoutPlan = TypedDict('LayoutPlan', {
 - 例外はログにスタックトレースを書き、影響最小化（個別 Renderer 異常でも他タイル継続）。
 - `pipe_stream` 利用時は終了時に必ず解除（ON は後続機能）。
 - tmux 未インストール/未起動の検出: 起動時に`tmux -V`/libtmux接続を試行し、分かりやすい診断を出力（復旧案内）。
+- **dashboardセッション消失時**：
+  - `window_size()` 等で `subprocess.CalledProcessError` をキャッチ。
+  - SessionManager でセッション再作成。
+  - ターミナルに `[tmux-dashboard] Recreated dashboard session` を表示。
+  - 同一サイクル内でレイアウトを再構築（レンダラーも自動再起動）。
 
 ## ログ / 可観測性
 - 出力先: `~/.local/state/tmux-dashboard`。
@@ -213,13 +225,14 @@ repo-root/
 ├─ tmux_dashboard/
 │  ├─ __init__.py
 │  ├─ __main__.py            # CLIエントリ: 引数パース、Orchestrator起動/終了処理
-│  ├─ orchestrator.py        # セッション検出・レイアウト・pane管理
+│  ├─ orchestrator.py        # セッション検出・レイアウト・pane管理・自動復旧
 │  ├─ renderer.py            # タイル描画（ANSI差分描画・fps制御）
 │  ├─ tmuxio.py              # TmuxDriver抽象 + LibtmuxDriver/CliDriver
 │  ├─ layout.py              # 列/行計算・分割計画
 │  ├─ config.py              # 設定ロード/バリデーション
 │  ├─ logging_setup.py       # RotatingFileHandler 初期化
-│  └─ utils_wcwidth.py       # 幅計算/ANSIユーティリティ
+│  ├─ utils_wcwidth.py       # 幅計算/ANSIユーティリティ
+│  └─ session_manager.py     # dashboardセッション管理
 ├─ tests/
 │  ├─ conftest.py            # 共通fixture（libtmux TestServer, 時刻モック 等）
 │  ├─ test_config.py

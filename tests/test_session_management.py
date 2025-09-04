@@ -70,5 +70,7 @@ def test_main_ensures_dashboard_session(monkeypatch):
     rc = cli.main(["--once"])
     
     # dashboardセッション確保が呼ばれたことを確認
-    mock_ensure.assert_called_once_with(mock_io)
+    # 起動時と1回、--onceモードでも1回の計2回呼ばれる
+    assert mock_ensure.call_count == 2
+    mock_ensure.assert_called_with(mock_io)
     assert rc == 0

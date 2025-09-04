@@ -11,10 +11,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 import logging
+import subprocess
 
 from . import layout
 from . import config
 from .tmuxio import TmuxIO
+from . import session_manager
 
 
 @dataclass
@@ -112,15 +114,44 @@ class Orchestrator:
             self.io.set_pane_title(pane_id, name)
 
     def run_once(self, window_target: str = "dashboard:0") -> Dict:
-        """1サイクル: 計画→分割→タイトル設定→計画返却。"""
+        """1サイクル: 計画→分割→タイトル設定→計画返却。
+        
+        dashboardセッションが消失している場合は自動的に再作成して復旧する。
+        """
         logger = logging.getLogger("tmux_dashboard.orchestrator")
         sessions = self.scan_sessions()
-        W, H = self.window_size(window_target)
-        logger.info("detected: sessions=%s, window=%sx%s", sessions, W, H)
+        
+        # dashboardセッションの存在確認とwindow_size取得を試行
+        try:
+            W, H = self.window_size(window_target)
+            logger.info("detected: sessions=%s, window=%sx%s", sessions, W, H)
+        except (subprocess.CalledProcessError, Exception) as e:
+            # dashboardセッションが存在しない場合の自動復旧
+            logger.warning("Failed to get window size for %s: %s", window_target, e)
+            logger.info("Attempting to recreate dashboard session...")
+            
+            # dashboardセッションを再作成
+            created = session_manager.ensure_dashboard_session(self.io)
+            if created:
+                print("[tmux-dashboard] Recreated dashboard session", flush=True)
+                logger.info("Successfully recreated dashboard session")
+            
+            # 再試行
+            try:
+                W, H = self.window_size(window_target)
+                logger.info("Retry successful: window=%sx%s", W, H)
+            except Exception as retry_error:
+                logger.error("Failed to recover dashboard session: %s", retry_error)
+                # 復旧に失敗した場合は空の計画を返す
+                return {"columns": 0, "rows": 0, "sessions": [], "positions": []}
 
         # 現在の計画を算出
-        plan = self.compute_plan(window_target)
-        logger.info("plan: columns=%s rows=%s", plan["columns"], plan["rows"])
+        try:
+            plan = self.compute_plan(window_target)
+            logger.info("plan: columns=%s rows=%s", plan["columns"], plan["rows"])
+        except Exception as e:
+            logger.error("Failed to compute plan: %s", e)
+            return {"columns": 0, "rows": 0, "sessions": [], "positions": []}
 
         # レイアウト差分判定（columns/rows/sessions のシグネチャ）
         signature = (plan["columns"], plan["rows"], tuple(plan["sessions"]))
