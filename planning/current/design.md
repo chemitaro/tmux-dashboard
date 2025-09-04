@@ -42,7 +42,7 @@
 ### 主要コンポーネント
 
 #### 1. Orchestrator
-- 役割: セッション検出、ウィンドウ寸法取得、レイアウト計算、pane 構成、Renderer のライフサイクル管理、dashboardセッション管理。
+- 役割: セッション検出、ウィンドウ寸法取得、レイアウト計算、pane 構成、Renderer のライフサイクル管理、dashboardセッション管理、ペイン整合性監視。
 - 主機能:
   - `scan_sessions()`：`tmux list-sessions` → 除外 → ASCII 昇順。
   - `resolve_target_pane(session)`：ウィンドウ/ペイン選定ルールで対象 pane_id を取得。
@@ -52,6 +52,7 @@
   - `apply_pane_titles()`：`set-option -w` と `select-pane -T`。
   - `spawn_renderers()`：各タイルで Renderer 起動（対象 pane を引数）。
   - `handle_dashboard_recovery()`：dashboardセッション消失時の検出と自動再作成。
+  - `check_pane_integrity()`：dashboard内ペインタイトルと表示すべきセッション名の整合性チェック。
   - ポーリングループ：`poll_interval_sec` 間隔で再評価（≤3秒反映）。
 
 #### 2. Renderer（TerminalDriver=ansi 既定）
@@ -69,7 +70,7 @@
   - `LibtmuxDriver`（既定）: `libtmux.Server/Session/Window/Pane` を用いて操作。未サポートは `obj.cmd(...)` で生コマンド実行。
   - `CliDriver`: `subprocess.run(["tmux", ...])` による直接実行。
   - 設定: `config.tmux.driver in {"libtmux","cli"}`。
-- 主機能: `list_sessions()`, `list_windows(session)`, `list_panes(session, win)`, `display(target, fmt)`, `capture(target, opts)`, `set_window_option`, `select_pane_title` など。
+- 主機能: `list_sessions()`, `list_windows(session)`, `list_panes(session, win)`, `list_panes_with_titles(window)`, `display(target, fmt)`, `capture(target, opts)`, `set_window_option`, `select_pane_title` など。
 
 ##### 3.1 LibtmuxDriver 詳細（Phase 8 事前整理）
 - Server 初期化: `socket_name` / `socket_path` を `libtmux.Server(**kwargs)` に反映（cfg 由来）。
@@ -117,6 +118,7 @@ class TmuxIO:
     def list_sessions(self) -> list[str]: ...
     def list_windows(self, session: str) -> list[dict]: ...  # {index:int, active:bool}
     def list_panes(self, session: str, win_idx: int) -> list[dict]: ...  # {index:int, active:bool, id:str}
+    def list_panes_with_titles(self, window: str) -> list[tuple[str, str]]: ...  # [(pane_id, title), ...]
     def display(self, target: str, fmt: str) -> str: ...
     def capture(self, target: str, *, H: int, join_wrapped: bool) -> str: ...
     def set_window_option(self, target: str, key: str, value: str): ...  # -w 限定
@@ -132,7 +134,8 @@ class TmuxDriver(Protocol):
     def set_pane_title(self, pane_target: str, title: str): ...
 
 class Orchestrator:
-    def run(self): ...
+    def check_pane_integrity(self, window_target: str, expected_sessions: list[str]) -> bool: ...
+    def run_once(self): ...
 
 class Renderer:
     def loop(self): ...
@@ -146,6 +149,16 @@ SessionView = TypedDict('SessionView', {
   'session': str,
   'target_pane_id': str,   # 対象セッション側の pane_id
   'tile_pane_id': str,     # dashboard 側の pane_id
+})
+```
+
+### レイアウトシグネチャ
+```python
+LayoutSignature = TypedDict('LayoutSignature', {
+  'columns': int,
+  'rows': int,
+  'sessions': Tuple[str, ...],
+  'pane_titles': Set[str],  # ペインタイトルのセット（順序不問）
 })
 ```
 
@@ -164,6 +177,12 @@ LayoutPlan = TypedDict('LayoutPlan', {
 1. `list_windows(session)` から `active==True` を優先。無ければ `index` 最小。
 2. 該当 window の `list_panes(session, win_idx)` から `active==True` を優先。無ければ `index` 最小。
 3. 得た `pane_id` を対象として Renderer が `capture-pane -t <pane_id>` を行う。
+
+### ペイン整合性チェック（要件 5.8）
+1. `list_panes_with_titles("dashboard:0")` でペインタイトル一覧を取得。
+2. タイトルのセットを作成。
+3. 期待されるセッション名セットと比較。
+4. 不一致の場合、全面再レイアウトをトリガー。
 
 ### レイアウト計算（要件 5.3, 6）
 - `columns = max(1, min(N, floor(W / min_tile_width)))`  # N は対象セッション数（dashboard除外後）
@@ -190,10 +209,15 @@ LayoutPlan = TypedDict('LayoutPlan', {
 - フレーム制御: `max_fps=30`、キュー輻輳時は古いフレームをドロップ（最新優先）。
 - 行末リセット: 各行末に `\x1b[0m` を付与。
 
-### ポーリングと再配置（要件 4, 6, 9）
+### ポーリングと再配置（要件 4, 5.8, 6, 9）
 - 周期: `poll_interval_sec`（既定 2s）。
-- 監視対象: セッション一覧、`dashboard:0` の `window_width/height`。
-- 差分検知: セッション増減 or W/H 変化 or `min_tile_width` 影響 → レイアウト再計算。
+- 監視対象: 
+  - セッション一覧
+  - `dashboard:0` の `window_width/height`
+  - `dashboard:0` のペインタイトル一覧
+- 差分検知: 
+  - セッション増減 or W/H 変化 or `min_tile_width` 影響 → レイアウト再計算
+  - ペインタイトルが期待セッション名セットと不一致 → 全面再レイアウト
 - レンダラーは W/H 変化を検知し即時再描画。
 
 ## エラーハンドリング / リトライ
