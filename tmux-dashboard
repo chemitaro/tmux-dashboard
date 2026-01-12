@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+die() {
+  echo "tmux-dashboard: $*" >&2
+  exit 1
+}
+
+show_help() {
+  cat <<'EOF'
+tmux-dashboard
+
+Usage:
+  tmux-dashboard [--config PATH]
+
+Behavior:
+  - Ensures the tmux session "dashboard" exists
+  - Starts the tmux-dashboard runner in a separate window (so it won't manage itself)
+  - Switches/attaches to dashboard:0
+
+Notes:
+  - Dependencies are expected to be installed at install time (via `uv sync --locked`).
+  - The runner runs inside the "dashboard" session, so killing that session stops it.
+EOF
+}
+
+CONFIG_PATH=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    --config)
+      shift || true
+      [[ $# -gt 0 ]] || die "--config requires a path"
+      CONFIG_PATH="$1"
+      shift || true
+      ;;
+    *)
+      die "unknown argument: $1"
+      ;;
+  esac
+done
+
+resolve_script_path() {
+  # Resolve symlinks for $1 (macOS-friendly: no readlink -f).
+  local script_path="$1"
+  if [[ "$script_path" != /* ]]; then
+    script_path="$(pwd)/$script_path"
+  fi
+  while [[ -L "$script_path" ]]; do
+    local dir
+    dir="$(cd -P "$(dirname "$script_path")" && pwd)"
+    local link
+    link="$(readlink "$script_path")"
+    if [[ "$link" == /* ]]; then
+      script_path="$link"
+    else
+      script_path="$dir/$link"
+    fi
+  done
+  echo "$(cd -P "$(dirname "$script_path")" && pwd)/$(basename "$script_path")"
+}
+
+find_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    command -v uv
+    return 0
+  fi
+
+  local candidate=""
+  for candidate in \
+    "${HOME}/.local/bin/uv" \
+    "${HOME}/.cargo/bin/uv" \
+    "/opt/homebrew/bin/uv" \
+    "/usr/local/bin/uv"; do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+# Resolve repo root from this script location (works even when invoked via symlink).
+SCRIPT_REALPATH="$(resolve_script_path "$0")"
+REPO_DIR="$(cd "$(dirname "$SCRIPT_REALPATH")" && pwd)"
+
+command -v tmux >/dev/null 2>&1 || die "tmux not found (tmux 3.2+ recommended)"
+UV_BIN="$(find_uv || true)"
+[[ -n "$UV_BIN" ]] || die "uv not found. Ensure uv is on PATH (including inside tmux), or install it under ~/.local/bin, ~/.cargo/bin, /opt/homebrew/bin, or /usr/local/bin."
+
+[[ -f "$REPO_DIR/pyproject.toml" ]] || die "pyproject.toml not found at: $REPO_DIR"
+[[ -d "$REPO_DIR/.venv" ]] || die "virtualenv not found at: $REPO_DIR/.venv (run: cd \"$REPO_DIR\" && \"$UV_BIN\" sync --locked)"
+
+SESSION_NAME="dashboard"
+DASHBOARD_WINDOW_INDEX="0"
+RUNNER_WINDOW_NAME="__tmux_dashboard_runner__"
+
+runner_cmd=("$UV_BIN" run --no-sync python -m tmux_dashboard)
+if [[ -n "$CONFIG_PATH" ]]; then
+  runner_cmd+=(--config "$CONFIG_PATH")
+fi
+runner_cmd+=(--window-target "${SESSION_NAME}:${DASHBOARD_WINDOW_INDEX}")
+runner_cmd_str="$(printf '%q ' "${runner_cmd[@]}")"
+runner_cmd_str="${runner_cmd_str% }"
+runner_shell_cmd="/bin/bash -lc $(printf '%q' "exec $runner_cmd_str")"
+
+# Ensure the session exists (creates window 0).
+if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+  tmux new-session -d -s "$SESSION_NAME" -n "dashboard" -c "$REPO_DIR"
+fi
+
+# Ensure dashboard:0 exists (the visible tiled dashboard window).
+if ! tmux list-windows -t "$SESSION_NAME" -F "#{window_index}" 2>/dev/null | grep -Fxq "$DASHBOARD_WINDOW_INDEX"; then
+  tmux new-window -d -t "${SESSION_NAME}:${DASHBOARD_WINDOW_INDEX}" -n "dashboard" -c "$REPO_DIR"
+fi
+
+# Locate/create the runner window.
+runner_window_index="$(
+  tmux list-windows -t "$SESSION_NAME" -F "#{window_index}\t#{window_name}" \
+    | awk -F '\t' -v name="$RUNNER_WINDOW_NAME" '$2==name{print $1; exit}'
+)"
+if [[ -z "$runner_window_index" ]]; then
+  tmux new-window -d -t "$SESSION_NAME" -n "$RUNNER_WINDOW_NAME" -c "$REPO_DIR" "$runner_shell_cmd"
+  runner_window_index="$(
+    tmux list-windows -t "$SESSION_NAME" -F "#{window_index}\t#{window_name}" \
+      | awk -F '\t' -v name="$RUNNER_WINDOW_NAME" '$2==name{print $1; exit}'
+  )"
+fi
+[[ -n "$runner_window_index" ]] || die "failed to create runner window"
+
+# If the runner pane isn't running tmux_dashboard, respawn it.
+runner_pane_target="${SESSION_NAME}:${runner_window_index}.0"
+runner_pane_pid="$(tmux display-message -p -t "$runner_pane_target" "#{pane_pid}" 2>/dev/null || true)"
+runner_args=""
+if [[ -n "$runner_pane_pid" ]]; then
+  runner_args="$(ps -p "$runner_pane_pid" -o args= 2>/dev/null || ps -p "$runner_pane_pid" -o command= 2>/dev/null || true)"
+fi
+if [[ "$runner_args" != *"tmux_dashboard"* ]]; then
+  tmux respawn-pane -k -t "$runner_pane_target" -c "$REPO_DIR" "$runner_shell_cmd"
+fi
+
+# Display the dashboard window.
+if [[ -n "${TMUX-}" ]]; then
+  tmux switch-client -t "${SESSION_NAME}:${DASHBOARD_WINDOW_INDEX}"
+else
+  exec tmux attach -t "${SESSION_NAME}:${DASHBOARD_WINDOW_INDEX}"
+fi

@@ -55,14 +55,34 @@ git clone https://github.com/chemitaro/tmux-dashboard.git
 cd tmux-dashboard
 ```
 
-3. Install dependencies:
+3. Install the global command (includes dependency sync, may require sudo):
 ```bash
-uv sync
+make install
 ```
+
+> Note:
+> - `make install` creates a symlink to this repository's `./tmux-dashboard` script.
+>   If you move or delete the repository, the `tmux-dashboard` command will break — re-run `make install`.
+> - On Apple Silicon Homebrew, you may want `make install PREFIX=/opt/homebrew` (or `PREFIX="$(brew --prefix)"`).
 
 ## Quick Start
 
-Simply run:
+Install a global command (to `/usr/local/bin`, may require sudo):
+```bash
+make install
+```
+
+To uninstall:
+```bash
+make uninstall
+```
+
+Then run from anywhere:
+```bash
+tmux-dashboard
+```
+
+Alternatively, run directly via uv:
 ```bash
 uv run python -m tmux_dashboard
 ```
@@ -76,6 +96,11 @@ The dashboard will:
 To view the dashboard:
 ```bash
 tmux attach -t dashboard
+```
+
+To stop (runner exits when the session is killed):
+```bash
+tmux kill-session -t dashboard
 ```
 
 ## Real-World Usage

@@ -28,7 +28,18 @@ def _exists_tmux() -> bool:
     return shutil.which("tmux") is not None
 
 
-pytestmark = pytest.mark.skipif(not _exists_tmux(), reason="tmux not available")
+def _tmux_usable() -> bool:
+    """tmux が起動・ソケット作成できるかを検査する（サンドボックス環境では失敗し得る）。"""
+    if not _exists_tmux():
+        return False
+    cp = subprocess.run(["tmux", "start-server"], capture_output=True)
+    if cp.returncode != 0:
+        return False
+    subprocess.run(["tmux", "kill-server"], capture_output=True)
+    return True
+
+
+pytestmark = pytest.mark.skipif(not _tmux_usable(), reason="tmux not usable in this environment")
 
 
 @pytest.fixture(autouse=True)

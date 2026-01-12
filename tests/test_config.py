@@ -52,6 +52,18 @@ def test_config_path_precedence(tmp_path, monkeypatch):
     assert c.viewer.max_fps == 20
 
 
+def test_config_path_tilde_expansion(tmp_path, monkeypatch):
+    """--configで~を含むパスはHOMEに展開されて読み込まれる。"""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg_file = tmp_path / "my.yaml"
+    cfg_file.write_text("min_tile_width: 57\n", encoding="utf-8")
+
+    from tmux_dashboard import config
+
+    c = config.load_config("~/my.yaml")
+    assert c.min_tile_width == 57
+
+
 def test_home_config_fallback(tmp_path, monkeypatch):
     """--config未指定時は ~/.config/tmux-dashboard/config.yaml があれば読み込む。"""
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -92,6 +104,7 @@ def test_project_config_file_priority(tmp_path, monkeypatch):
     """プロジェクト内のconfigs/dashboard.yamlが優先される。"""
     # HOMEを一時ディレクトリに設定
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     
     # プロジェクト内設定ファイルを作成
     project_config_dir = Path("configs")
@@ -125,6 +138,7 @@ def test_project_config_file_priority(tmp_path, monkeypatch):
 def test_explicit_config_overrides_all(tmp_path, monkeypatch):
     """--configで明示指定した場合、すべての設定を上書きする。"""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     
     # プロジェクト内設定
     project_config_dir = Path("configs")

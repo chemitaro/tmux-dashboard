@@ -60,7 +60,7 @@ def test_scan_sort_exclude_and_titles_and_layout():
     from tmux_dashboard import config
 
     io = FakeIO(sessions=["gamma", "dashboard", "alpha", "beta"], width=120, height=50, panes=["%1", "%2", "%3"])
-    c = config.load_config(None)
+    c = config.Config()
     o = orchestrator.Orchestrator(io=io, cfg=c)
     plan = o.run_once(window_target="dashboard:0")
 
@@ -78,7 +78,7 @@ def test_layout_recalc_on_resize():
     from tmux_dashboard import config
 
     io = FakeIO(sessions=["a", "b", "c"], width=120, height=40, panes=["%1", "%2", "%3"])
-    c = config.load_config(None)
+    c = config.Config()
     o = orchestrator.Orchestrator(io=io, cfg=c)
     p1 = o.run_once(window_target="dashboard:0")
     assert p1["columns"] == 3
@@ -94,7 +94,7 @@ def test_apply_layout_split_calls():
     from tmux_dashboard import config
 
     io = FakeIO(sessions=["a", "b", "c", "d"], width=120, height=40, panes=["%1", "%2", "%3", "%4"])
-    c = config.load_config(None)
+    c = config.Config()
     o = orchestrator.Orchestrator(io=io, cfg=c)
     plan = o.compute_plan(window_target="dashboard:0")
     # N=4, W=120, min=40 => C=3, R=2 → 水平分割(C-1)=2, 垂直分割(列ごと)=配分に応じて≥1
@@ -113,7 +113,7 @@ def test_apply_layout_uses_progressive_percentages():
 
     # 3列に分割する場合
     io = FakeIO(sessions=["a", "b", "c"], width=120, height=40, panes=["%1", "%2", "%3"])
-    c = config.load_config(None)
+    c = config.Config()
     o = orchestrator.Orchestrator(io=io, cfg=c)
     
     # 3セッション、W=120、min_tile_width=40 => C=3、R=1

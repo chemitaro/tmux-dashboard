@@ -148,7 +148,7 @@ def load_config(config_path: t.Optional[str]) -> Config:
     path: t.Optional[Path] = None
 
     if config_path:
-        p = Path(config_path)
+        p = expanduser_path(config_path)
         if p.exists():
             path = p
     

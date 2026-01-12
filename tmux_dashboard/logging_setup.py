@@ -25,28 +25,32 @@ def setup_logging(cfg: Config) -> logging.Logger:
     - ローテーション: `rotate_max_bytes` / `rotate_backup_count` 準拠
     - ログレベル: `cfg.logging.level`
     """
-    log_dir = expanduser_path(cfg.logging.dir)
-    _ensure_dir(log_dir)
-
     logger = logging.getLogger("tmux_dashboard")
     logger.setLevel(getattr(logging, cfg.logging.level.upper(), logging.INFO))
 
     # 同一プロセスで重複設定されないよう初期化
     logger.handlers.clear()
 
-    log_file = log_dir / "tmux-dashboard.log"
-    handler = RotatingFileHandler(
-        filename=str(log_file),
-        maxBytes=cfg.logging.rotate_max_bytes,
-        backupCount=cfg.logging.rotate_backup_count,
-        encoding="utf-8",
-    )
     formatter = logging.Formatter(
         fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+
+    # ファイル出力（RotatingFileHandler）は、権限やサンドボックスで失敗し得るため安全に初期化する。
+    try:
+        log_dir = expanduser_path(cfg.logging.dir)
+        _ensure_dir(log_dir)
+        log_file = log_dir / "tmux-dashboard.log"
+        handler = RotatingFileHandler(
+            filename=str(log_file),
+            maxBytes=cfg.logging.rotate_max_bytes,
+            backupCount=cfg.logging.rotate_backup_count,
+            encoding="utf-8",
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    except OSError as e:  # pragma: no cover - 実行環境依存（権限/サンドボックス）
+        print(f"[tmux-dashboard] WARN: cannot write log file: {e}", file=sys.stderr, flush=True)
 
     # ターミナル出力（StreamHandler）を追加（常時可視化）
     sh = logging.StreamHandler(stream=sys.stdout)

@@ -1,10 +1,12 @@
 UV ?= uv
 PY ?= python3
-LOG_PATH ?= $(HOME)/.local/state/tmux-dashboard/runner.out
 CONFIG ?= $(if $(wildcard $(CURDIR)/configs/dashboard.yaml),$(CURDIR)/configs/dashboard.yaml,$(HOME)/.config/tmux-dashboard/config.yaml)
-TIMEOUT_SEC ?= 8
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+BIN ?= tmux-dashboard
+BIN_SCRIPT ?= $(CURDIR)/$(BIN)
 
-.PHONY: help doctor start run attach stop
+.PHONY: help doctor install uninstall start run attach stop
 
 ## help: Show available targets
 help:
@@ -45,18 +47,35 @@ doctor:
 		echo 'Found issues above. Please fix them and re-run make doctor.'; exit 1; \
 	fi
 
-## start: Sync dependencies, launch dashboard in background, then attach
+## start: Start dashboard runner and display dashboard:0 (no dependency sync)
 start:
-	$(UV) sync
-	@mkdir -p $$(dirname $(LOG_PATH))
-	@nohup $(UV) run $(PY) -m tmux_dashboard --config "$(CONFIG)" >>$(LOG_PATH) 2>&1 &
-	@end=$$(( $$(date +%s) + $(TIMEOUT_SEC) )); \
-	while ! tmux has-session -t dashboard 2>/dev/null; do \
-		[ $$(date +%s) -lt $$end ] || { echo 'Timeout: dashboard session not ready.'; exit 1; }; \
-		sleep 0.2; \
-	done; \
-	printf 'dashboard session ready. attaching...\n'; \
-	exec tmux attach -t dashboard
+	@./tmux-dashboard --config "$(CONFIG)"
+
+## install: Install tmux-dashboard command to /usr/local/bin (may require sudo)
+install:
+	$(UV) sync --locked
+	@chmod +x "$(BIN_SCRIPT)"
+	@if [ -w "$(BINDIR)" ]; then \
+		ln -sf "$(BIN_SCRIPT)" "$(BINDIR)/$(BIN)"; \
+	else \
+		echo "INFO: $(BINDIR) is not writable; trying sudo..."; \
+		sudo ln -sf "$(BIN_SCRIPT)" "$(BINDIR)/$(BIN)"; \
+	fi
+	@echo "OK: installed $(BINDIR)/$(BIN) -> $(BIN_SCRIPT)"
+
+## uninstall: Remove tmux-dashboard command from /usr/local/bin (may require sudo)
+uninstall:
+	@if [ -e "$(BINDIR)/$(BIN)" ] || [ -L "$(BINDIR)/$(BIN)" ]; then \
+		if [ -w "$(BINDIR)" ]; then \
+			rm -f "$(BINDIR)/$(BIN)"; \
+		else \
+			echo "INFO: $(BINDIR) is not writable; trying sudo..."; \
+			sudo rm -f "$(BINDIR)/$(BIN)"; \
+		fi; \
+		echo "OK: removed $(BINDIR)/$(BIN)"; \
+	else \
+		echo "INFO: not installed: $(BINDIR)/$(BIN)"; \
+	fi
 
 ## run: Sync dependencies and run dashboard in foreground
 run:
