@@ -294,7 +294,8 @@ uv run pytest -q
 - `spec-lite/current/plan.md` - S03 の進捗状態を更新
 
 #### コミット
-- 未実施（このログ記録後に S03 スコープでコミット予定）
+- `af191807638d2192f0551200d24e3074eb4ae24f`
+- `fix(tmux): headless e2e を通常検証へ移行`
 
 #### メモ
 - `dynamic_add_then_remove` には headless 条件での動的 `xfail` 分岐がまだ残るが、今回の S03 受け入れ条件で対象としていた 2 ケースの通常検証化は達成した。
@@ -302,15 +303,17 @@ uv run pytest -q
 ---
 
 ## 遭遇した問題と解決 (任意)
-- 問題: ...
-  - 解決: ...
+- 問題: headless tmux で `split-window -p` が `size missing` で失敗し、dashboard が 1 pane のまま復旧しない
+  - 解決: `-l` ベースの split へ移行し、staging window による non-destructive apply と E2E 回帰テストまで通して復旧した
 
 ## 学んだこと (任意)
-- ...
+- detached/headless tmux では pane title や window size の扱いがクライアント接続時と揺れやすく、split 成功だけでなく昇格条件の設計が重要だった
+- staging 昇格前に title 完全一致まで要求すると fail-closed が過剰になりやすく、構造検証と最終 title 整合を分ける方が安定した
 - ...
 
 ## 今後の推奨事項 (任意)
-- ...
+- `test_e2e_dynamic_add_then_remove` に残る headless 条件の動的 `xfail` 分岐は、必要なら次の改善対象として通常検証化を検討する
+- title を継続的に上書きする特殊端末があるなら、pane title 再適用の再試行戦略を設定化してもよい
 - ...
 
 ## 省略/例外メモ (必須)
