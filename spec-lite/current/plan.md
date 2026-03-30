@@ -24,12 +24,12 @@
   - [x] S01: `-l` ベースの分割 API と分割長算出を追加し、headless で split が通る土台を作る
   - [x] S02: orchestrator を非破壊 apply と pane 数検証に対応させ、失敗を可視化する
   - [x] S03: integrity 判定順序と E2E/回帰テストを整え、headless 復旧を保証する
-  - [ ] S04: wrapper 経路の `create_window` 根本原因を除去し、same-name 条件の回帰テストで固定する
+  - [x] S04: wrapper 経路の `create_window` 根本原因を除去し、same-name 条件の回帰テストで固定する
 - historical / superseded steps（任意）:
   - [x] 旧 `planning/current/task.md` による `-p` ベース前提の実装計画（`@spec-lite/completed/20260330_1843_planning-migration/task.md` にアーカイブ済み）
 
 ## 現行の実行対象スコープ (任意)
-- S04: `create_window()` の target 契約修正、phantom target 防止、wrapper same-name regression の自動検証
+- S04: `create_window()` の target 契約修正、phantom target 防止、wrapper actual-path regression、partial-create cleanup、residual cleanup retry branches の自動検証
 
 ## ネスト運用ルール (必須)
 - トップレベルステップ `Sxx` は「観測可能な成果」で分ける
@@ -232,7 +232,7 @@
 - Then: pane が増え、pane title が対象セッションに一致し、既存 `xfail` の一部を通常検証へ置き換えられる
 - 観測点（UI/HTTP/DB/Log など）: `tmux list-panes`, E2E テスト結果, CLI ログ
 - 追加/更新するテスト:
-  - `tests/test_e2e_tmux.py`
+  - `tests/test_e2e_tmux.py`（actual wrapper path を優先）
   - `tests/test_cli_entry.py` または既存 CLI 回帰テストの確認
 
 #### 作業ブロック（必須）
@@ -274,7 +274,7 @@
   - renderer / tile 表示仕様変更
 
 #### update_plan（着手時に登録） (必須)
-- [ ] `update_plan` に、このステップの作業ブロックを登録した
+- [x] `update_plan` に、このステップの作業ブロックを登録した
 - 登録する作業ブロック:
   - S04-B1: `create_window()` 契約の Red/Green
   - S04-B2: wrapper same-name regression の Red/Green
@@ -326,11 +326,11 @@
     - Refactor: `spec-lite/current/report.md` を更新し、review スコープでコミット境界を確定する
 
 #### ステップ末尾（省略しない） (必須)
-- [ ] 期待するテストと必要な品質ゲートを実施し、成功した
-- [ ] 必要なレビュー / QA ゲートを通過した、または不要理由を記録した
-- [ ] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
-- [ ] `update_plan` を更新し、このステップの作業ブロックを完了にした
-- [ ] コミット境界を確定した（コミットしない場合は理由を記録した）
+- [x] 期待するテストと必要な品質ゲートを実施し、成功した
+- [x] 必要なレビュー / QA ゲートを通過した、または不要理由を記録した（コミット前レビューはユーザー対応待ち）
+- [x] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
+- [x] `update_plan` を更新し、このステップの作業ブロックを完了にした
+- [x] コミット境界を確定した（コミットは未実施。ユーザーレビュー待ち）
 
 ## 未確定事項（TBD） (必須)
 - 該当なし

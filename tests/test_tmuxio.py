@@ -410,6 +410,8 @@ def test_cli_window_lifecycle_commands(monkeypatch):
 
     def fake_run(args, capture_output=True, check=True):
         issued.append(" ".join(args))
+        if args[:3] == ["tmux", "list-panes", "-t"]:
+            return _fake_completed("%9\n")
         return _fake_completed("")
 
     monkeypatch.setattr(tmuxio, "_run_subprocess", fake_run)
@@ -423,8 +425,9 @@ def test_cli_window_lifecycle_commands(monkeypatch):
     io.kill_window("dashboard:99")
 
     assert target == "dashboard:99"
-    assert any("new-window -d -P -F #{session_name}:#{window_index} -t dashboard" in cmd for cmd in issued)
+    assert any("new-window -d -P -F #{session_name}:#{window_index} -t dashboard:99" in cmd for cmd in issued)
     assert any("resize-window -t dashboard:99 -x 120 -y 50" in cmd for cmd in issued)
+    assert any("list-panes -t dashboard:99 -F #{pane_id}" in cmd for cmd in issued)
     assert any("swap-window -s dashboard:99 -t dashboard:0" in cmd for cmd in issued)
     assert any("kill-window -t dashboard:99" in cmd for cmd in issued)
 
@@ -444,7 +447,9 @@ def test_libtmux_window_lifecycle_calls():
             server_calls.append(list(args))
 
             class R:
-                stdout = [""]
+                stdout = ["%9"] if args[:3] == ("list-panes", "-t", "dashboard:99") else [""]
+                stderr = [""]
+                returncode = 0
 
             return R()
 
@@ -465,8 +470,90 @@ def test_libtmux_window_lifecycle_calls():
         "-F",
         "#{session_name}:#{window_index}",
         "-t",
-        "dashboard",
+        "dashboard:99",
     ] in server_calls
+    assert ["list-panes", "-t", "dashboard:99", "-F", "#{pane_id}"] in server_calls
     assert ["resize-window", "-t", "dashboard:99", "-x", "120", "-y", "50"] in server_calls
     assert ["swap-window", "-s", "dashboard:99", "-t", "dashboard:0"] in server_calls
     assert ["kill-window", "-t", "dashboard:99"] in server_calls
+
+
+def test_cli_create_window_raises_when_created_target_does_not_exist(monkeypatch):
+    """目的: CLI経路の create_window が phantom target を返さず fail-closed になることを確認する。
+    前提: new-window 自体は成功するが、作成後の target 実在確認では pane が見つからない。
+    期待: create_window は例外を送出し、存在しない target を返さない。
+    """
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    issued = []
+
+    def fake_run(args, capture_output=True, check=True):
+        issued.append(" ".join(args))
+        if args[:3] == ["tmux", "list-panes", "-t"]:
+            return _fake_completed("")
+        return _fake_completed("")
+
+    monkeypatch.setattr(tmuxio, "_run_subprocess", fake_run)
+
+    c = config.load_config(None)
+    c.tmux.driver = "cli"
+    io = tmuxio.create_from_config(c)
+
+    with pytest.raises(RuntimeError, match="dashboard:99"):
+        io.create_window("dashboard", 99, detached=True)
+
+    assert any("new-window -d -P -F #{session_name}:#{window_index} -t dashboard:99" in cmd for cmd in issued)
+    assert any("list-panes -t dashboard:99 -F #{pane_id}" in cmd for cmd in issued)
+
+
+def test_libtmux_create_window_raises_on_returncode_stderr_and_missing_target():
+    """目的: libtmux経路の create_window が失敗要因ごとに fail-closed になることを確認する。
+    前提: returncode異常、stderr出力、target未作成の3条件を順に与える。
+    期待: いずれも例外を送出し、phantom target を返さない。
+    """
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    class FakeResult:
+        def __init__(self, stdout=None, stderr=None, returncode=0):
+            self.stdout = stdout or [""]
+            self.stderr = stderr or [""]
+            self.returncode = returncode
+
+    class FakeServer:
+        def __init__(self):
+            self.calls = []
+            self.mode = "returncode"
+
+        def cmd(self, *args):
+            self.calls.append(list(args))
+            if args[0] == "new-window":
+                if self.mode == "returncode":
+                    return FakeResult(returncode=1)
+                if self.mode == "stderr":
+                    return FakeResult(stderr=["create window failed: index 0 in use"])
+                return FakeResult(stdout=["dashboard:99"])
+            if args[0] == "list-panes":
+                return FakeResult(stdout=[""])
+            return FakeResult()
+
+    c = config.load_config(None)
+    c.tmux.driver = "libtmux"
+    io = tmuxio.create_from_config(c)
+    server = FakeServer()
+    io.driver._server = server  # type: ignore[attr-defined]
+
+    with pytest.raises(RuntimeError):
+        io.create_window("dashboard", 99, detached=True)
+
+    server.mode = "stderr"
+    with pytest.raises(RuntimeError, match="index 0 in use"):
+        io.create_window("dashboard", 99, detached=True)
+
+    server.mode = "missing"
+    with pytest.raises(RuntimeError, match="dashboard:99"):
+        io.create_window("dashboard", 99, detached=True)
+
+    assert ["new-window", "-d", "-P", "-F", "#{session_name}:#{window_index}", "-t", "dashboard:99"] in server.calls
+    assert ["list-panes", "-t", "dashboard:99", "-F", "#{pane_id}"] in server.calls
