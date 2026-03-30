@@ -29,6 +29,7 @@ class FakeIO:
         self.fail_split_for_targets = set()
         self.freeze_split_growth_for_targets = set()
         self.fail_title_for_targets = set()
+        self.flip_title_once_for_targets = set()
         self.fail_kill_window_targets = set()
         self.overwrite_title_on_respawn = False
 
@@ -146,7 +147,12 @@ class FakeIO:
     def list_panes_with_titles(self, window_target: str):
         if window_target in self.fail_title_for_targets:
             raise RuntimeError("forced title fetch failure")
-        return [(pid, self._pane_titles.get(pid, "")) for pid, _, _ in self._details_by_window.get(window_target, [])]
+        rows = [(pid, self._pane_titles.get(pid, "")) for pid, _, _ in self._details_by_window.get(window_target, [])]
+        if window_target in self.flip_title_once_for_targets and rows:
+            self.flip_title_once_for_targets.remove(window_target)
+            wrong_title = "__transient_mismatch__"
+            rows = [(rows[0][0], wrong_title), *rows[1:]]
+        return rows
 
     def list_windows_with_active(self, session_name: str):
         indexes = []
@@ -246,6 +252,28 @@ def test_apply_layout_split_calls_and_result():
     assert len(v) >= 1
 
 
+def test_apply_layout_uses_given_sessions_without_rescan():
+    """目的: apply_layout が引数 sessions を優先し再スキャンしないことを確認する。
+    前提: scan_sessions を呼ぶと失敗するようにする。
+    期待: 例外なく success=True で分割処理が完了する。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(sessions=["a", "b", "c"], width=120, height=40, panes=["%1", "%2", "%3"])
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+    o.scan_sessions = lambda: (_ for _ in ()).throw(AssertionError("scan_sessions must not be called"))  # type: ignore[method-assign]
+
+    result = o.apply_layout(
+        window_target="dashboard:0",
+        columns=3,
+        rows=1,
+        sessions=["a", "b", "c"],
+    )
+    assert result.success is True
+
+
 def test_run_once_preserves_dashboard_on_staging_failure():
     """目的: staging で分割失敗しても既存 dashboard を保持することを確認する。
     前提: staging target で split が例外になる。
@@ -320,10 +348,10 @@ def test_run_once_detects_pane_shortage_without_silent_zip():
     assert io.list_panes("dashboard:0") == original
 
 
-def test_run_once_preserves_dashboard_when_staging_integrity_fetch_fails():
-    """目的: staging integrity の取得失敗時に fail-closed で停止することを確認する。
+def test_run_once_ignores_staging_title_fetch_failure_for_swap():
+    """目的: staging 昇格判定が title 依存でないことを確認する。
     前提: staging target の list_panes_with_titles が例外を送出する。
-    期待: swap は実行されず、staging だけ cleanup され、dashboard:0 は維持される。
+    期待: 構造整合が満たされていれば swap は実行される。
     """
     from tmux_dashboard import orchestrator
     from tmux_dashboard import config
@@ -336,15 +364,15 @@ def test_run_once_preserves_dashboard_when_staging_integrity_fetch_fails():
     o = orchestrator.Orchestrator(io=io, cfg=c)
     _ = o.run_once(window_target="dashboard:0")
 
-    assert io.swap_window_calls == []
+    assert io.swap_window_calls == [("dashboard:99", "dashboard:0")]
     assert "dashboard:99" in io.kill_window_calls
-    assert io.list_panes("dashboard:0") == original
+    assert io.list_panes("dashboard:0") != original
 
 
 def test_integrity_check_order_avoids_initial_noise():
     """目的: initial integrity ノイズを避ける呼び出し順を確認する。
     前提: 同一 signature で 2 回 run_once を実行する。
-    期待: 1 回目は staging window で、2 回目は dashboard:0 で integrity が評価される。
+    期待: 1 回目は swap 後に strict 評価、2 回目は active window で通常評価される。
     """
     from tmux_dashboard import orchestrator
     from tmux_dashboard import config
@@ -355,17 +383,17 @@ def test_integrity_check_order_avoids_initial_noise():
 
     called_calls = []
 
-    def fake_check(target, strict=False):
-        called_calls.append((target, strict))
+    def fake_check(target, strict=False, invalidate_signature=True):
+        called_calls.append((target, strict, invalidate_signature))
         return False
 
     o.check_pane_integrity = fake_check  # type: ignore[method-assign]
     _ = o.run_once(window_target="dashboard:0")
     _ = o.run_once(window_target="dashboard:0")
 
-    assert called_calls[0] == ("dashboard:99", True)
-    assert called_calls[1] == ("dashboard:0", True)
-    assert called_calls[2] == ("dashboard:0", False)
+    assert called_calls[0] == ("dashboard:0", True, False)
+    assert called_calls[1] == ("dashboard:0", False, True)
+    assert len(called_calls) == 2
 
 
 def test_zero_sessions_keeps_single_pane_and_returns_normally():
@@ -405,3 +433,31 @@ def test_run_once_reapplies_titles_after_respawn_overwrite():
 
     titles = {title for _, title in io.list_panes_with_titles("dashboard:0")}
     assert titles == {"alpha", "beta"}
+
+
+def test_run_once_keeps_signature_when_post_respawn_mismatch_recovers():
+    """目的: post-respawn の一時的不整合復旧時に signature を無効化しないことを確認する。
+    前提: dashboard:0 のタイトル取得が1回だけ不一致を返し、その後は通常値へ戻る。
+    期待: 2回目の run_once で不要な再レイアウト（staging 作成）が発生しない。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(sessions=["dashboard", "alpha", "beta"], width=120, height=40, panes=["%1", "%2"])
+    io.flip_title_once_for_targets.add("dashboard:0")
+    io.overwrite_title_on_respawn = True
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+
+    first_plan = o.run_once(window_target="dashboard:0")
+    expected_signature = (
+        first_plan["columns"],
+        first_plan["rows"],
+        tuple(first_plan["sessions"]),
+    )
+    assert o._last_signature == expected_signature
+    assert len(io.create_window_calls) == 1
+
+    _ = o.run_once(window_target="dashboard:0")
+    assert len(io.create_window_calls) == 1

@@ -242,10 +242,62 @@ uv run pytest -q
 - `spec-lite/current/report.md` - S02 の実装 / 検証 / レビュー結果を追記
 
 #### コミット
-- 未実施（このログ記録後に S02 スコープでコミット予定）
+- `b711add3027d5dc0ef7dfeb2bffa69c055ac42e2`
+- `fix(tmux): 非破壊レイアウト適用と整合性検証を強化`
 
 #### メモ
 - QA の最終確認では `uv run pytest -q -rxX` で既知 headless ケースが `xfailed` として残ることを確認しており、これは S03 の E2E 整理対象とする。
+
+---
+
+### 2026-03-30 23:40 - 2026-03-31 00:30
+
+#### 対象
+- Step: S03
+- AC/EC: AC-001, AC-003 / EC-002, EC-004
+
+#### 実施内容
+- `orchestrator.py` の staging 昇格前判定を title 完全一致依存から切り離し、pane 構造と件数整合を確認する `validate_staging_structure()` ベースへ寄せた。
+- `apply_layout()` が同一サイクル中に `scan_sessions()` し直さないよう `sessions` 引数を受け取る形へ変更し、`run_once()` で確定した session 集合を固定化した。
+- `validate_mapping()` に exact 条件を追加し、staging 側の pane 構造が E2E の期待と一致する場合のみ昇格するようにした。
+- `tests/test_e2e_tmux.py` の `test_e2e_many_sessions_grid_exact` と `test_e2e_resize_up_and_down` を通常検証へ戻し、headless でも `xfail` なしで通る状態にした。
+- code review の non-blocking 指摘に対応し、post-respawn の一時的不整合が解消された後に `_last_signature` が不要に無効化されないよう `invalidate_signature` 制御と回帰テストを追加した。
+- 最終的に `code_reviewer` / `qa_reviewer` とも `pass`、全体回帰 `84 passed` → 最終確認で `85 passed` を確認した。
+
+#### 実行コマンド / 結果
+```bash
+uv run pytest tests/test_orchestrator.py tests/test_pane_integrity.py -q
+# 18 passed in 0.02s
+
+uv run pytest tests/test_orchestrator.py tests/test_e2e_tmux.py -q -rxX
+# 16 passed in 1.87s
+
+uv run pytest -q
+# 84 passed in 1.84s
+
+uv run pytest tests/test_orchestrator.py -q
+# 11 passed in 0.08s
+
+uv run pytest tests/test_orchestrator.py tests/test_pane_integrity.py tests/test_e2e_tmux.py -q
+# 25 passed in 1.70s
+
+uv run pytest -q
+# 85 passed
+```
+
+#### 変更したファイル
+- `tmux_dashboard/orchestrator.py` - staging 構造検証、sessions 固定化、exact mapping、post-respawn signature 保持を実装
+- `tests/test_e2e_tmux.py` - 2つの E2E ケースを通常検証へ戻し、`xfail` 分岐を削除/縮小
+- `tests/test_orchestrator.py` - staging 構造検証と post-respawn signature 保持の回帰テストを追加
+- `tests/test_pane_integrity.py` - S03 の整合性判定仕様に合わせて期待値を更新
+- `spec-lite/current/report.md` - S02/S03 のコミット情報と検証結果を追記
+- `spec-lite/current/plan.md` - S03 の進捗状態を更新
+
+#### コミット
+- 未実施（このログ記録後に S03 スコープでコミット予定）
+
+#### メモ
+- `dynamic_add_then_remove` には headless 条件での動的 `xfail` 分岐がまだ残るが、今回の S03 受け入れ条件で対象としていた 2 ケースの通常検証化は達成した。
 
 ---
 

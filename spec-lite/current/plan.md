@@ -23,7 +23,7 @@
 - active / current steps:
   - [x] S01: `-l` ベースの分割 API と分割長算出を追加し、headless で split が通る土台を作る
   - [x] S02: orchestrator を非破壊 apply と pane 数検証に対応させ、失敗を可視化する
-  - [ ] S03: integrity 判定順序と E2E/回帰テストを整え、headless 復旧を保証する
+  - [x] S03: integrity 判定順序と E2E/回帰テストを整え、headless 復旧を保証する
 - historical / superseded steps（任意）:
   - [x] 旧 `planning/current/task.md` による `-p` ベース前提の実装計画（`@spec-lite/completed/20260330_1843_planning-migration/task.md` にアーカイブ済み）
 
@@ -200,7 +200,7 @@
 - [x] 必要なレビュー / QA ゲートを通過した、または不要理由を記録した
 - [x] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
 - [x] `update_plan` を更新し、このステップの作業ブロックを完了にした
-- [ ] コミット境界を確定した（コミットしない場合は理由を記録した）
+- [x] コミット境界を確定した（コミットしない場合は理由を記録した）
 
 ### S03 — headless E2E と回帰テストで復旧を保証する (必須)
 - 対象: AC-001 / AC-003 / EC-002 / EC-004 / 制約: CLI 互換維持
@@ -214,7 +214,7 @@
   - 新規 CLI オプション
 
 #### update_plan（着手時に登録） (必須)
-- [ ] `update_plan` に、このステップの作業ブロックを登録した
+- [x] `update_plan` に、このステップの作業ブロックを登録した
 - 登録する作業ブロック:
   - S03-B1: headless E2E の Red/Green
   - S03-B2: 全体回帰と spec/report 整合
@@ -247,10 +247,10 @@
     - Refactor: `spec-lite/current/report.md` を更新し、コミット境界を確定する
 
 #### ステップ末尾（省略しない） (必須)
-- [ ] 期待するテストと必要な品質ゲートを実施し、成功した
-- [ ] 必要なレビュー / QA ゲートを通過した、または不要理由を記録した
-- [ ] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
-- [ ] `update_plan` を更新し、このステップの作業ブロックを完了にした
+- [x] 期待するテストと必要な品質ゲートを実施し、成功した
+- [x] 必要なレビュー / QA ゲートを通過した、または不要理由を記録した
+- [x] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
+- [x] `update_plan` を更新し、このステップの作業ブロックを完了にした
 - [ ] コミット境界を確定した（コミットしない場合は理由を記録した）
 
 ## 未確定事項（TBD） (必須)
