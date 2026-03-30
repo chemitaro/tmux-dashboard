@@ -12,11 +12,21 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 import logging
 import subprocess
+import time
 
 from . import layout
 from . import config
 from .tmuxio import TmuxIO
 from . import session_manager
+
+
+@dataclass
+class LayoutApplyResult:
+    """レイアウト適用結果。"""
+
+    success: bool
+    pane_ids: List[str]
+    error_message: str | None = None
 
 
 @dataclass
@@ -54,66 +64,88 @@ class Orchestrator:
         }
         return plan
 
-    def apply_layout(self, window_target: str, columns: int, rows: int) -> None:
-        """グリッド分割: 列→行の順で分割し、空セルは生成しない。
+    def _sorted_panes(self, window_target: str) -> List[str]:
+        """列優先（左→右、上→下）の pane_id 一覧を返す。"""
+        try:
+            details = self.io.list_panes_detailed(window_target)
+            return [pid for pid, _, _ in sorted(details, key=lambda x: (x[1], x[2]))]
+        except Exception:
+            return self.io.list_panes(window_target)
 
-        既存の pane 数が目標と一致する場合は分割処理を行わず、フリッカーを抑制する。
+    def validate_mapping(self, tiles: List[str], sessions: List[str]) -> None:
+        """tile 数と session 数の整合を検証する。"""
+        if len(tiles) < len(sessions):
+            raise RuntimeError(
+                f"pane shortage: tiles={len(tiles)} sessions={len(sessions)}"
+            )
+
+    def _pick_staging_window_index(self, session_name: str) -> int:
+        """staging 用の未使用 window index を選ぶ。"""
+        wins = self.io.list_windows_with_active(session_name)
+        used = {idx for idx, _ in wins}
+        idx = max(99, (max(used) + 1) if used else 99)
+        while idx in used:
+            idx += 1
+        return idx
+
+    def apply_layout(self, window_target: str, columns: int, rows: int) -> LayoutApplyResult:
+        """グリッド分割を適用し、結果を返す。
+
+        失敗は例外送出せず `LayoutApplyResult` で返す。
         """
-        # 既存の pane 数が目標と一致する場合は分割処理を行わず、フリッカーを抑制
-        self.io.kill_other_panes(window_target)
-        if columns <= 0:
-            return
-        # 1) 列の分割（水平）
-        h_perc = layout.progressive_percent_splits(columns)
-        for i in range(max(0, columns - 1)):
-            self.io.split_window(window_target, direction="h", percent=h_perc[i])
-        # 2) 列ごとの行分割（垂直）: セッション配分に応じて分割
-        #    rows_per_col[c] = base + (c < remainder)
-        plan = self.compute_plan(window_target)
-        N = len(plan["sessions"])
-        base = N // columns
-        rem = N % columns
-        rows_per_col = [base + (1 if c < rem else 0) for c in range(columns)]
-        # 列の左座標で top pane を特定
-        details = self.io.list_panes_detailed(window_target)
-        # left 昇順で列の top pane を抽出
-        # group by left
-        left_to_top: list[tuple[int, str]] = []
-        by_left: dict[int, list[tuple[str, int, int]]] = {}
-        for pid, left, top in details:
-            by_left.setdefault(left, []).append((pid, left, top))
-        for left in sorted(by_left.keys()):
-            top_pane = min(by_left[left], key=lambda x: x[2])
-            left_to_top.append((left, top_pane[0]))
-        # 列ごとに必要な行数-1だけ分割
-        for idx, (_, pane_id) in enumerate(left_to_top[:columns]):
-            need = max(0, rows_per_col[idx] - 1)
-            if need == 0:
-                continue
-            v_perc = layout.progressive_percent_splits(rows_per_col[idx])
-            for k in range(need):
-                # 対象列の top pane を選択して分割
-                try:
-                    self.io.select_pane(pane_id)
-                except Exception:
-                    pass
-                self.io.split_pane(pane_id, direction="v", percent=v_perc[k])
+        try:
+            self.io.kill_other_panes(window_target)
+            if columns <= 0:
+                return LayoutApplyResult(success=True, pane_ids=self._sorted_panes(window_target))
+
+            # 1) 列の分割（水平）
+            h_perc = layout.progressive_percent_splits(columns)
+            for i in range(max(0, columns - 1)):
+                self.io.split_window(window_target, direction="h", percent=h_perc[i])
+
+            # 2) 列ごとの行分割（垂直）
+            sessions = self.scan_sessions()
+            N = len(sessions)
+            base = N // columns
+            rem = N % columns
+            rows_per_col = [base + (1 if c < rem else 0) for c in range(columns)]
+
+            details = self.io.list_panes_detailed(window_target)
+            left_to_top: list[tuple[int, str]] = []
+            by_left: dict[int, list[tuple[str, int, int]]] = {}
+            for pid, left, top in details:
+                by_left.setdefault(left, []).append((pid, left, top))
+            for left in sorted(by_left.keys()):
+                top_pane = min(by_left[left], key=lambda x: x[2])
+                left_to_top.append((left, top_pane[0]))
+
+            for idx, (_, pane_id) in enumerate(left_to_top[:columns]):
+                need = max(0, rows_per_col[idx] - 1)
+                if need == 0:
+                    continue
+                v_perc = layout.progressive_percent_splits(rows_per_col[idx])
+                for k in range(need):
+                    try:
+                        self.io.select_pane(pane_id)
+                    except Exception:
+                        pass
+                    self.io.split_pane(pane_id, direction="v", percent=v_perc[k])
+
+            return LayoutApplyResult(success=True, pane_ids=self._sorted_panes(window_target))
+        except Exception as e:
+            return LayoutApplyResult(success=False, pane_ids=[], error_message=str(e))
 
     def apply_titles(self, window_target: str, sessions: List[str]) -> None:
         """pane border を有効化し、pane_title にセッション名を割り当てる。"""
         # ボーダーを上部にし、タイトルは pane_title を表示
         self.io.set_window_option(window_target, "pane-border-status", "top")
         self.io.set_window_option(window_target, "pane-border-format", "#{pane_title}")
-        # 列優先（左→右、上→下）で pane を並べ替え
-        try:
-            details = self.io.list_panes_detailed(window_target)
-            panes_sorted = [pid for pid, _, _ in sorted(details, key=lambda x: (x[1], x[2]))]
-        except Exception:
-            panes_sorted = self.io.list_panes(window_target)
+        panes_sorted = self._sorted_panes(window_target)
+        self.validate_mapping(panes_sorted, sessions)
         for pane_id, name in zip(panes_sorted, sessions):
             self.io.set_pane_title(pane_id, name)
     
-    def check_pane_integrity(self, window_target: str) -> bool:
+    def check_pane_integrity(self, window_target: str, *, strict: bool = False) -> bool:
         """ペインタイトルの整合性を確認し、不一致なら再レイアウトが必要。
         
         Returns:
@@ -131,7 +163,10 @@ class Orchestrator:
             actual_titles = set(title for _, title in panes_with_titles)
         except Exception as e:
             logger.warning("Failed to get pane titles: %s", e)
-            # エラー時は整合性チェックをスキップ
+            # strict モードでは検証不能を不整合として扱う（fail-closed）。
+            if strict:
+                return True
+            # 非 strict では従来どおり整合性チェックをスキップ。
             return False
         
         # 集合が一致しない場合は再レイアウトが必要
@@ -187,26 +222,70 @@ class Orchestrator:
             logger.error("Failed to compute plan: %s", e)
             return {"columns": 0, "rows": 0, "sessions": [], "positions": []}
 
-        # ペイン整合性チェック（タイトルが期待と異なる場合は再レイアウト）
-        integrity_failed = self.check_pane_integrity(window_target)
-        
         # レイアウト差分判定（columns/rows/sessions のシグネチャ）
         signature = (plan["columns"], plan["rows"], tuple(plan["sessions"]))
-        need_layout = (signature != self._last_signature) or integrity_failed
-        if need_layout:
-            # 分割とタイトル設定（ログは tmuxio 側で DEBUG 出力）
-            self.apply_layout(window_target, plan["columns"], plan["rows"])
-            self.apply_titles(window_target, plan["sessions"])
+        sessions = plan["sessions"]
+
+        # 0セッションは正常系: 単一pane維持のみ行う
+        if not sessions:
+            try:
+                self.io.kill_other_panes(window_target)
+            except Exception as e:
+                logger.warning("failed to shrink empty dashboard: %s", e)
             self._last_signature = signature
+            self._last_mapping = []
+            return plan
+
+        need_layout = signature != self._last_signature
+        if not need_layout:
+            # signature が不変のときだけ active window で integrity を評価
+            need_layout = self.check_pane_integrity(window_target)
+
+        if need_layout:
+            staging_target: str | None = None
+            try:
+                staging_index = self._pick_staging_window_index("dashboard")
+                staging_target = self.io.create_window(
+                    "dashboard",
+                    staging_index,
+                    detached=True,
+                    width=W,
+                    height=H,
+                )
+
+                result = self.apply_layout(staging_target, plan["columns"], plan["rows"])
+                if not result.success:
+                    raise RuntimeError(result.error_message or "layout apply failed")
+
+                self.apply_titles(staging_target, sessions)
+                if self.check_pane_integrity(staging_target, strict=True):
+                    raise RuntimeError("pane integrity check failed on staging window")
+
+                self.io.swap_window(staging_target, window_target)
+                # swap 後、staging target 側に旧 dashboard:0 が来る
+                self.io.kill_window(staging_target)
+                self._last_signature = signature
+            except Exception as e:
+                logger.error("non-destructive apply failed: %s", e)
+                if staging_target is not None:
+                    try:
+                        self.io.kill_window(staging_target)
+                    except Exception as cleanup_error:
+                        logger.warning(
+                            "failed to cleanup staging window %s: %s",
+                            staging_target,
+                            cleanup_error,
+                        )
+                return plan
 
         # タイルpane（列優先）とセッションのマッピングを作成
+        tiles_sorted = self._sorted_panes(window_target)
         try:
-            details = self.io.list_panes_detailed(window_target)
-            tiles_sorted = [pid for pid, _, _ in sorted(details, key=lambda x: (x[1], x[2]))]
-        except Exception:
-            tiles_sorted = self.io.list_panes(window_target)
+            self.validate_mapping(tiles_sorted, sessions)
+        except RuntimeError as e:
+            logger.error("mapping validation failed: %s", e)
+            return plan
 
-        sessions = plan["sessions"]
         # resolve/respawn が未実装なIO（テスト用Fakeなど）では描画起動をスキップ
         # VS Code対応: resolve_best_paneを優先、なければresolve_active_paneにフォールバック
         resolver = getattr(self.io, "resolve_best_pane", None) or getattr(self.io, "resolve_active_pane", None)
@@ -239,6 +318,12 @@ class Orchestrator:
                 except Exception as e:  # pragma: no cover - 実行環境依存
                     logger.error("failed to respawn renderer on %s: %s", tile_pane, e)
             self._last_mapping = mapping
+            # respawn で pane_title が上書きされる環境があるため、最後に再適用する。
+            self.apply_titles(window_target, sessions)
+            # 起動直後にタイトルが再上書きされるケースに備え、短時間待って再適用する。
+            if self.check_pane_integrity(window_target, strict=True):
+                time.sleep(0.05)
+                self.apply_titles(window_target, sessions)
         try:
             logger.info("titles: %s", [t for t in self.io.list_panes_detailed(window_target)])
         except Exception:

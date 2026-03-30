@@ -22,7 +22,7 @@
 ## ステップ一覧（観測可能な振る舞い） (必須)
 - active / current steps:
   - [x] S01: `-l` ベースの分割 API と分割長算出を追加し、headless で split が通る土台を作る
-  - [ ] S02: orchestrator を非破壊 apply と pane 数検証に対応させ、失敗を可視化する
+  - [x] S02: orchestrator を非破壊 apply と pane 数検証に対応させ、失敗を可視化する
   - [ ] S03: integrity 判定順序と E2E/回帰テストを整え、headless 復旧を保証する
 - historical / superseded steps（任意）:
   - [x] 旧 `planning/current/task.md` による `-p` ベース前提の実装計画（`@spec-lite/completed/20260330_1843_planning-migration/task.md` にアーカイブ済み）
@@ -139,20 +139,21 @@
 - [x] 必要なレビュー / QA ゲートを通過した、または不要理由を記録した
 - [x] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
 - [x] `update_plan` を更新し、このステップの作業ブロックを完了にした
-- [ ] コミット境界を確定した（コミットしない場合は理由を記録した）
+- [x] コミット境界を確定した（コミットしない場合は理由を記録した）
 
 ### S02 — レイアウト適用を非破壊にし、pane 数不足を黙殺しない (必須)
 - 対象: AC-002 / AC-003 / AC-004 / EC-001 / EC-002 / EC-003 / 制約: dashboard 非侵襲
 - 設計参照:
   - 対象IF/API: IF-004, IF-005
   - 対象テスト:
+    - `tests/test_tmuxio.py`
     - `tests/test_orchestrator.py`
     - `tests/test_pane_integrity.py`
 - このステップで「追加しないこと（スコープ固定）」:
   - headless E2E の本格追加
 
 #### update_plan（着手時に登録） (必須)
-- [ ] `update_plan` に、このステップの作業ブロックを登録した
+- [x] `update_plan` に、このステップの作業ブロックを登録した
 - 登録する作業ブロック:
   - S02-B1: 非破壊 apply のテストと実装
   - S02-B2: pane 数検証と integrity 順序見直し
@@ -164,6 +165,7 @@
 - Then: staging window 上での適用成功時のみ `dashboard:0` を切り替え、pane 数不足や失敗は明示的に観測できる
 - 観測点（UI/HTTP/DB/Log など）: pane 一覧、ログ、例外/結果オブジェクト
 - 追加/更新するテスト:
+  - `tests/test_tmuxio.py`
   - `tests/test_orchestrator.py`
   - `tests/test_pane_integrity.py`
   - 0 セッション時に単一 pane を維持してエラーにしないケースを含む
@@ -190,14 +192,14 @@
 - S02-B3: 品質ゲート / 報告 / コミット
   - S02-B3-I1:
     - Red: 該当なし
-    - Green: `uv run pytest tests/test_orchestrator.py tests/test_pane_integrity.py -q` を実行し、成功を確認する
+    - Green: `uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_pane_integrity.py -q` を実行し、成功を確認する
     - Refactor: `spec-lite/current/report.md` を更新し、コミット境界を確定する
 
 #### ステップ末尾（省略しない） (必須)
-- [ ] 期待するテストと必要な品質ゲートを実施し、成功した
-- [ ] 必要なレビュー / QA ゲートを通過した、または不要理由を記録した
-- [ ] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
-- [ ] `update_plan` を更新し、このステップの作業ブロックを完了にした
+- [x] 期待するテストと必要な品質ゲートを実施し、成功した
+- [x] 必要なレビュー / QA ゲートを通過した、または不要理由を記録した
+- [x] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
+- [x] `update_plan` を更新し、このステップの作業ブロックを完了にした
 - [ ] コミット境界を確定した（コミットしない場合は理由を記録した）
 
 ### S03 — headless E2E と回帰テストで復旧を保証する (必須)

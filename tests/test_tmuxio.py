@@ -150,10 +150,10 @@ def test_libtmux_calls_use_cmd(monkeypatch):
     io.set_pane_title("%9", "name")
     w, h = io.window_size("dashboard:0")
 
-    # 検証（select-pane は server.cmd 側で呼び出す実装）
+    # 検証（set-option / select-pane は server.cmd 側で呼び出す実装）
     # H=5の場合、デフォルト設定では max(5*2, 5+20) = 25行を取得
     assert pane_calls[0] == ["capture-pane", "-p", "-e", "-S", "-25", "-t", "%9"]
-    assert window_calls[0] == ["set-option", "-w", "-t", "dashboard:0", "pane-border-status", "top"]
+    assert ["set-option", "-w", "-t", "dashboard:0", "pane-border-status", "top"] in server_calls
     assert ["select-pane", "-t", "%9", "-T", "name"] in server_calls
     assert (w, h) == (120, 50)
 
@@ -396,3 +396,77 @@ def test_libtmux_split_raises_value_error_when_length_and_percent_missing():
         io.split_pane("%A", direction="v")
 
     assert server_calls == []
+
+
+def test_cli_window_lifecycle_commands(monkeypatch):
+    """目的: CLI経路の window lifecycle API を確認する。
+    前提: create/swap/kill を順に実行する。
+    期待: tmux の new-window/swap-window/kill-window が正しい引数で呼ばれる。
+    """
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    issued = []
+
+    def fake_run(args, capture_output=True, check=True):
+        issued.append(" ".join(args))
+        return _fake_completed("")
+
+    monkeypatch.setattr(tmuxio, "_run_subprocess", fake_run)
+
+    c = config.load_config(None)
+    c.tmux.driver = "cli"
+    io = tmuxio.create_from_config(c)
+
+    target = io.create_window("dashboard", 99, detached=True, width=120, height=50)
+    io.swap_window("dashboard:99", "dashboard:0")
+    io.kill_window("dashboard:99")
+
+    assert target == "dashboard:99"
+    assert any("new-window -d -P -F #{session_name}:#{window_index} -t dashboard" in cmd for cmd in issued)
+    assert any("resize-window -t dashboard:99 -x 120 -y 50" in cmd for cmd in issued)
+    assert any("swap-window -s dashboard:99 -t dashboard:0" in cmd for cmd in issued)
+    assert any("kill-window -t dashboard:99" in cmd for cmd in issued)
+
+
+def test_libtmux_window_lifecycle_calls():
+    """目的: libtmux経路の window lifecycle API を確認する。
+    前提: create/swap/kill を順に実行する。
+    期待: server.cmd が対応コマンドで呼ばれる。
+    """
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    server_calls = []
+
+    class FakeServer:
+        def cmd(self, *args):
+            server_calls.append(list(args))
+
+            class R:
+                stdout = [""]
+
+            return R()
+
+    c = config.load_config(None)
+    c.tmux.driver = "libtmux"
+    io = tmuxio.create_from_config(c)
+    io.driver._server = FakeServer()  # type: ignore[attr-defined]
+
+    target = io.create_window("dashboard", 99, detached=True, width=120, height=50)
+    io.swap_window("dashboard:99", "dashboard:0")
+    io.kill_window("dashboard:99")
+
+    assert target == "dashboard:99"
+    assert [
+        "new-window",
+        "-d",
+        "-P",
+        "-F",
+        "#{session_name}:#{window_index}",
+        "-t",
+        "dashboard",
+    ] in server_calls
+    assert ["resize-window", "-t", "dashboard:99", "-x", "120", "-y", "50"] in server_calls
+    assert ["swap-window", "-s", "dashboard:99", "-t", "dashboard:0"] in server_calls
+    assert ["kill-window", "-t", "dashboard:99"] in server_calls

@@ -189,10 +189,63 @@ uv run pytest tests/test_layout.py tests/test_tmuxio.py -q
 - `spec-lite/current/plan.md` - S01 進行状態を更新
 
 #### コミット
-- 未実施（このログ記録後に S01 スコープでコミット予定）
+- `9f30c345e1bbd1b409daa27240a51fbb8e6443a2`
+- `fix(tmux): headless split を -l ベースに移行`
 
 #### メモ
 - 初回 QA は `review_status: pass` だったが non-blocking finding として失敗系テスト不足を指摘したため、ユーザー指示に従って是正後に fresh review を再実施した。
+
+---
+
+### 2026-03-30 20:00 - 23:40
+
+#### 対象
+- Step: S02
+- AC/EC: AC-002, AC-003, AC-004 / EC-001, EC-002, EC-003
+
+#### 実施内容
+- `tmuxio.py` に window lifecycle API（`create_window`, `swap_window`, `kill_window`）を CLI / libtmux / TmuxIO 全体で追加し、staging window を扱えるようにした。
+- `orchestrator.py` に `LayoutApplyResult`、`validate_mapping()`、staging window ベースの non-destructive apply、0 セッション早期 return、signature 変化時の integrity 順序見直しを実装した。
+- staging integrity が fail-open になる blocker を是正し、strict モードの integrity 判定と回帰テストを追加した。
+- staging 作成時のサイズ継承と respawn 後の pane title 再適用を追加し、E2E で見つかったサイズ巻き戻り・title 上書き回帰を是正した。
+- cleanup 再失敗時の warning ログも追加し、最後の non-blocking 指摘まで解消した。
+- `code_reviewer` / `qa_reviewer` を複数回回し、blocker 2 件と non-blocking 1 件を是正後、最終的に両 review を `pass` にした。
+
+#### 実行コマンド / 結果
+```bash
+uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_pane_integrity.py -q
+# 25 passed in 0.04s
+
+uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_pane_integrity.py -q
+# 27 passed in 0.04s
+
+uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_pane_integrity.py -q
+# 28 passed in 0.04s
+
+uv run pytest tests/test_orchestrator.py -q
+# 9 passed in 0.02s
+
+uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_pane_integrity.py -q
+# 29 passed in 0.04s
+
+uv run pytest -q
+# 81 passed, 1 xfailed in 1.39s
+```
+
+#### 変更したファイル
+- `tmux_dashboard/orchestrator.py` - staging window による非破壊 apply、mapping 検証、strict integrity、0 セッション分岐、title 再適用、cleanup warning を実装
+- `tmux_dashboard/tmuxio.py` - window lifecycle API と staging サイズ継承、libtmux の staging 関連挙動補正を実装
+- `tests/test_tmuxio.py` - window lifecycle API とサイズ継承の unit test を追加
+- `tests/test_orchestrator.py` - non-destructive apply、pane 不足、strict integrity、cleanup warning の回帰テストを追加
+- `tests/test_pane_integrity.py` - strict integrity と run_once 順序の回帰テストを追加
+- `spec-lite/current/plan.md` - S02 の対象テスト明示と進捗状態を更新
+- `spec-lite/current/report.md` - S02 の実装 / 検証 / レビュー結果を追記
+
+#### コミット
+- 未実施（このログ記録後に S02 スコープでコミット予定）
+
+#### メモ
+- QA の最終確認では `uv run pytest -q -rxX` で既知 headless ケースが `xfailed` として残ることを確認しており、これは S03 の E2E 整理対象とする。
 
 ---
 

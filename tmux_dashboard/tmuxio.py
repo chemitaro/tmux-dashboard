@@ -303,6 +303,48 @@ class CliDriver:
         if detached:
             args.append("-d")
         _run_subprocess(args)
+
+    def create_window(
+        self,
+        session_name: str,
+        window_index: int,
+        detached: bool = True,
+        *,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> str:
+        """指定セッションに window を作成し target を返す。"""
+        requested_target = f"{session_name}:{window_index}"
+        args = [
+            "tmux",
+            "new-window",
+            "-P",
+            "-F",
+            "#{session_name}:#{window_index}",
+            "-t",
+            session_name,
+        ]
+        if detached:
+            args.insert(2, "-d")
+        cp = _run_subprocess(args)
+        created = cp.stdout.decode().strip()
+        created_target = created or requested_target
+        if width is not None or height is not None:
+            resize_args = ["tmux", "resize-window", "-t", created_target]
+            if width is not None:
+                resize_args.extend(["-x", str(width)])
+            if height is not None:
+                resize_args.extend(["-y", str(height)])
+            _run_subprocess(resize_args)
+        return created_target
+
+    def swap_window(self, source_target: str, destination_target: str) -> None:
+        """2つの window を入れ替える。"""
+        _run_subprocess(["tmux", "swap-window", "-s", source_target, "-t", destination_target])
+
+    def kill_window(self, window_target: str) -> None:
+        """window を削除する。"""
+        _run_subprocess(["tmux", "kill-window", "-t", window_target])
     
     def list_panes_with_titles(self, window_target: str) -> list[tuple[str, str]]:
         """指定ウィンドウのペインIDとタイトルのリストを返す。
@@ -443,8 +485,8 @@ class LibtmuxDriver:
 
     def set_window_option(self, window_target: str, key: str, value: str) -> None:
         """ウィンドウ限定（-w）でオプションを設定する（非侵襲）。"""
-        wobj = self._get_window_by_target(window_target)
-        wobj.cmd("set-option", "-w", "-t", window_target, key, value)  # type: ignore[attr-defined]
+        server = self._ensure_server()
+        server.cmd("set-option", "-w", "-t", window_target, key, value)  # type: ignore[attr-defined]
 
     def set_pane_title(self, pane_target: str, title: str) -> None:
         """ペインタイトル（pane-border-formatが#{pane_title}）を設定する。"""
@@ -668,6 +710,54 @@ class LibtmuxDriver:
         if detached:
             args.append("-d")
         server.cmd(*args)  # type: ignore[attr-defined]
+
+    def create_window(
+        self,
+        session_name: str,
+        window_index: int,
+        detached: bool = True,
+        *,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> str:
+        """指定セッションに window を作成し target を返す。"""
+        server = self._ensure_server()
+        requested_target = f"{session_name}:{window_index}"
+        before_indexes = {idx for idx, _ in self.list_windows_with_active(session_name)}
+        args = ["new-window", "-P", "-F", "#{session_name}:#{window_index}", "-t", session_name]
+        if detached:
+            args.insert(1, "-d")
+        res = server.cmd(*args)  # type: ignore[attr-defined]
+        created = ""
+        for line in getattr(res, "stdout", []) or []:
+            text = str(line).strip()
+            if text:
+                created = text
+                break
+        if not created:
+            after_indexes = {idx for idx, _ in self.list_windows_with_active(session_name)}
+            new_indexes = sorted(after_indexes - before_indexes)
+            if new_indexes:
+                created = f"{session_name}:{new_indexes[0]}"
+        created_target = created or requested_target
+        if width is not None or height is not None:
+            resize_args = ["resize-window", "-t", created_target]
+            if width is not None:
+                resize_args.extend(["-x", str(width)])
+            if height is not None:
+                resize_args.extend(["-y", str(height)])
+            server.cmd(*resize_args)  # type: ignore[attr-defined]
+        return created_target
+
+    def swap_window(self, source_target: str, destination_target: str) -> None:
+        """2つの window を入れ替える。"""
+        server = self._ensure_server()
+        server.cmd("swap-window", "-s", source_target, "-t", destination_target)  # type: ignore[attr-defined]
+
+    def kill_window(self, window_target: str) -> None:
+        """window を削除する。"""
+        server = self._ensure_server()
+        server.cmd("kill-window", "-t", window_target)  # type: ignore[attr-defined]
     
     def list_panes_with_titles(self, window_target: str) -> list[tuple[str, str]]:
         """指定ウィンドウのペインIDとタイトルのリストを返す。
@@ -675,21 +765,19 @@ class LibtmuxDriver:
         Returns:
             [(pane_id, pane_title), ...]
         """
-        window = self._get_window_by_target(window_target)
-        if not window:
-            return []
-        
+        server = self._ensure_server()
+        res = server.cmd("list-panes", "-t", window_target, "-F", "#{pane_id} #{pane_title}")  # type: ignore[attr-defined]
         out: list[tuple[str, str]] = []
-        panes = getattr(window, "panes", [])
-        for pane in panes:
-            pane_id = getattr(pane, "id", "")
-            # libtmuxではpane_titleプロパティがない場合があるので、cmdで取得
-            try:
-                res = pane.cmd("display-message", "-p", "#{pane_title}")  # type: ignore[attr-defined]
-                title = str(getattr(res, "stdout", [""])[0]).strip() if hasattr(res, "stdout") else ""
-            except Exception:
-                title = getattr(pane, "pane_title", "")
-            out.append((pane_id, title))
+        for line in getattr(res, "stdout", []) or []:
+            text = str(line).strip()
+            if not text:
+                continue
+            parts = text.split(" ", 1)
+            if len(parts) == 2:
+                pane_id, title = parts
+                out.append((pane_id, title))
+            elif len(parts) == 1:
+                out.append((parts[0], ""))
         return out
 
     
@@ -761,6 +849,10 @@ class TmuxIO:
         """pane の (id, left, top) を返す。"""
         return self.driver.list_panes_detailed(window_target)
 
+    def list_windows_with_active(self, session_name: str) -> list[tuple[int, int]]:
+        """session 配下の (window_index, window_active) 一覧を返す。"""
+        return self.driver.list_windows_with_active(session_name)
+
     # ---- new helpers ----
     def resolve_active_pane(self, session_name: str) -> str | None:
         """各セッションで表示対象とする pane_id を決定する。"""
@@ -777,6 +869,32 @@ class TmuxIO:
     def create_session(self, session_name: str, detached: bool = True) -> None:
         """新しいtmuxセッションを作成する。"""
         return self.driver.create_session(session_name, detached)
+
+    def create_window(
+        self,
+        session_name: str,
+        window_index: int,
+        detached: bool = True,
+        *,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> str:
+        """指定セッションに window を作成し target を返す。"""
+        return self.driver.create_window(
+            session_name,
+            window_index,
+            detached,
+            width=width,
+            height=height,
+        )
+
+    def swap_window(self, source_target: str, destination_target: str) -> None:
+        """2つの window を入れ替える。"""
+        return self.driver.swap_window(source_target, destination_target)
+
+    def kill_window(self, window_target: str) -> None:
+        """window を削除する。"""
+        return self.driver.kill_window(window_target)
     
     def list_panes_with_titles(self, window_target: str) -> list[tuple[str, str]]:
         """指定ウィンドウのペインIDとタイトルのリストを返す。"""
