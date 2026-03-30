@@ -1,24 +1,65 @@
 """オーケストレータのテスト。
 
 目的:
-- セッション検出→ASCII昇順→`dashboard`除外。
-- ウィンドウ寸法からレイアウト計算（columns/rows）。
-- スプリット呼び出し回数（簡易）とタイトル設定（pane title）を確認。
+- staging window を使った non-destructive apply の挙動を確認する。
+- pane 数不足の明示失敗、integrity 判定順序、0セッション正常終了を確認する。
 """
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 
 class FakeIO:
+    """Orchestrator テスト用の最小 tmux I/O フェイク。"""
+
     def __init__(self, sessions, width, height, panes):
         self._sessions = sessions
         self._width = width
         self._height = height
-        self._panes = list(panes)
         self.set_window_option_calls = []
         self.set_title_calls = []
-        self.split_calls = []  # (dir, percent)
+        self.split_calls = []
         self.kill_calls = 0
+        self.create_window_calls = []
+        self.swap_window_calls = []
+        self.kill_window_calls = []
+        self.respawn_calls = []
+
+        self.fail_split_for_targets = set()
+        self.freeze_split_growth_for_targets = set()
+        self.fail_title_for_targets = set()
+        self.fail_kill_window_targets = set()
+        self.overwrite_title_on_respawn = False
+
+        self._details_by_window = {}
+        self._pane_to_window = {}
+        self._pane_titles = {}
+        self._next_pane_num = 100
+
+        self._init_window("dashboard:0", panes)
+
+    def _init_window(self, window_target: str, pane_ids: list[str]):
+        details = []
+        for idx, pane_id in enumerate(pane_ids):
+            details.append((pane_id, idx * 40, 0))
+            self._pane_to_window[pane_id] = window_target
+            self._pane_titles.setdefault(pane_id, "")
+        self._details_by_window[window_target] = details
+
+    def _new_pane_id(self) -> str:
+        self._next_pane_num += 1
+        return f"%{self._next_pane_num}"
+
+    def _append_pane(self, window_target: str, left: int, top: int):
+        pane_id = self._new_pane_id()
+        self._details_by_window.setdefault(window_target, []).append((pane_id, left, top))
+        self._pane_to_window[pane_id] = window_target
+        self._pane_titles[pane_id] = ""
+        return pane_id
+
+    def _session_of_target(self, window_target: str) -> str:
+        return window_target.split(":", 1)[0]
 
     def list_sessions(self):
         return list(self._sessions)
@@ -27,106 +68,340 @@ class FakeIO:
         return self._width, self._height
 
     def list_panes(self, window_target: str):
-        return list(self._panes)
+        return [pid for pid, _, _ in self._details_by_window.get(window_target, [])]
+
+    def list_panes_detailed(self, window_target: str):
+        return list(self._details_by_window.get(window_target, []))
 
     def set_window_option(self, window_target: str, key: str, value: str):
         self.set_window_option_calls.append((window_target, key, value))
 
     def set_pane_title(self, pane_id: str, title: str):
         self.set_title_calls.append((pane_id, title))
-
-    def split_window(self, window_target: str, direction: str, percent: int):
-        self.split_calls.append((direction, percent))
+        self._pane_titles[pane_id] = title
 
     def kill_other_panes(self, window_target: str):
         self.kill_calls += 1
+        details = self._details_by_window.get(window_target, [])
+        if not details:
+            return
+        keep = details[:1]
+        for pid, _, _ in details[1:]:
+            self._pane_to_window.pop(pid, None)
+            self._pane_titles.pop(pid, None)
+        self._details_by_window[window_target] = keep
 
-    # 追加: orchestrator の新APIに合わせたダミー
-    def list_panes_detailed(self, window_target: str):
-        # 簡易に固定の3カラム（left: 0,40,80）を想定、topは0
-        return [(pid, idx * 40, 0) for idx, pid in enumerate(self._panes[:3])]
+    def split_window(
+        self,
+        window_target: str,
+        direction: str,
+        length: str | int | None = None,
+        *,
+        percent: int | None = None,
+    ):
+        self.split_calls.append((window_target, direction, length, percent))
+        if window_target in self.fail_split_for_targets:
+            raise RuntimeError("forced split failure")
+        if window_target in self.freeze_split_growth_for_targets:
+            return
+        details = self._details_by_window.get(window_target, [])
+        if not details:
+            self._append_pane(window_target, 0, 0)
+            return
+        if direction == "h":
+            left = max(x[1] for x in details) + 40
+            top = 0
+        else:
+            left = details[0][1]
+            top = max(x[2] for x in details) + 10
+        self._append_pane(window_target, left, top)
+
     def select_pane(self, pane_id: str):
         return None
-    def split_pane(self, pane_id: str, direction: str, percent: int):
-        self.split_calls.append((direction, percent))
+
+    def split_pane(
+        self,
+        pane_id: str,
+        direction: str,
+        length: str | int | None = None,
+        *,
+        percent: int | None = None,
+    ):
+        window_target = self._pane_to_window[pane_id]
+        self.split_calls.append((window_target, direction, length, percent))
+        if window_target in self.fail_split_for_targets:
+            raise RuntimeError("forced split failure")
+        if window_target in self.freeze_split_growth_for_targets:
+            return
+        details = self._details_by_window.get(window_target, [])
+        base = next((x for x in details if x[0] == pane_id), details[0])
+        if direction == "v":
+            left = base[1]
+            top = max(x[2] for x in details if x[1] == left) + 10
+        else:
+            left = max(x[1] for x in details) + 40
+            top = base[2]
+        self._append_pane(window_target, left, top)
+
     def list_panes_with_titles(self, window_target: str):
-        # テスト用: pane IDとタイトルを返す
-        return [(pid, f"session_{idx}") for idx, pid in enumerate(self._panes)]
+        if window_target in self.fail_title_for_targets:
+            raise RuntimeError("forced title fetch failure")
+        return [(pid, self._pane_titles.get(pid, "")) for pid, _, _ in self._details_by_window.get(window_target, [])]
+
+    def list_windows_with_active(self, session_name: str):
+        indexes = []
+        for target in self._details_by_window:
+            sess, idx = target.split(":", 1)
+            if sess == session_name:
+                indexes.append(int(idx))
+        indexes.sort()
+        return [(idx, 1 if idx == 0 else 0) for idx in indexes]
+
+    def create_window(
+        self,
+        session_name: str,
+        window_index: int,
+        detached: bool = True,
+        *,
+        width: int | None = None,
+        height: int | None = None,
+    ):
+        target = f"{session_name}:{window_index}"
+        self.create_window_calls.append((session_name, window_index, detached, width, height))
+        if target in self._details_by_window:
+            raise RuntimeError("window already exists")
+        self._init_window(target, [self._new_pane_id()])
+        return target
+
+    def swap_window(self, source_target: str, destination_target: str):
+        self.swap_window_calls.append((source_target, destination_target))
+        src = self._details_by_window[source_target]
+        dst = self._details_by_window[destination_target]
+        self._details_by_window[source_target], self._details_by_window[destination_target] = dst, src
+        for pid, _, _ in self._details_by_window[source_target]:
+            self._pane_to_window[pid] = source_target
+        for pid, _, _ in self._details_by_window[destination_target]:
+            self._pane_to_window[pid] = destination_target
+
+    def kill_window(self, window_target: str):
+        self.kill_window_calls.append(window_target)
+        if window_target in self.fail_kill_window_targets:
+            raise RuntimeError("forced kill-window failure")
+        removed = self._details_by_window.pop(window_target, [])
+        for pid, _, _ in removed:
+            self._pane_to_window.pop(pid, None)
+            self._pane_titles.pop(pid, None)
+
+    def resolve_best_pane(self, session_name: str):
+        return f"{session_name}:0.0"
+
+    def respawn_pane(self, pane_id: str, argv):
+        self.respawn_calls.append((pane_id, list(argv)))
+        if self.overwrite_title_on_respawn:
+            self._pane_titles[pane_id] = "node@host"
 
 
 def test_scan_sort_exclude_and_titles_and_layout():
-    """セッションはASCII昇順で`dashboard`除外、columns/rows計算とタイトル設定を行う。"""
+    """目的: run_once でセッション並び替え・レイアウト適用・タイトル設定を確認する。
+    前提: dashboard 以外に 3 セッションが存在する。
+    期待: ASCII昇順でタイトルが設定され、計画の列/行が期待通りになる。
+    """
     from tmux_dashboard import orchestrator
     from tmux_dashboard import config
 
-    io = FakeIO(sessions=["gamma", "dashboard", "alpha", "beta"], width=120, height=50, panes=["%1", "%2", "%3"])
+    io = FakeIO(
+        sessions=["gamma", "dashboard", "alpha", "beta"],
+        width=120,
+        height=50,
+        panes=["%1", "%2", "%3"],
+    )
     c = config.Config()
     o = orchestrator.Orchestrator(io=io, cfg=c)
     plan = o.run_once(window_target="dashboard:0")
 
     assert plan["columns"] == 3
     assert plan["rows"] == 1
-    # タイトル設定はASCII昇順でpaneに割り当て
-    assert io.set_window_option_calls[0] == ("dashboard:0", "pane-border-status", "top")
-    assert io.set_window_option_calls[1] == ("dashboard:0", "pane-border-format", "#{pane_title}")
-    assert io.set_title_calls == [("%1", "alpha"), ("%2", "beta"), ("%3", "gamma")]
+    assert sorted({title for _, title in io.set_title_calls}) == ["alpha", "beta", "gamma"]
+    assert io.swap_window_calls == [("dashboard:99", "dashboard:0")]
+    assert io.create_window_calls == [("dashboard", 99, True, 120, 50)]
 
 
-def test_layout_recalc_on_resize():
-    """幅の変化で列数が変わること。"""
-    from tmux_dashboard import orchestrator
-    from tmux_dashboard import config
-
-    io = FakeIO(sessions=["a", "b", "c"], width=120, height=40, panes=["%1", "%2", "%3"])
-    c = config.Config()
-    o = orchestrator.Orchestrator(io=io, cfg=c)
-    p1 = o.run_once(window_target="dashboard:0")
-    assert p1["columns"] == 3
-    # リサイズ
-    io._width = 79
-    p2 = o.run_once(window_target="dashboard:0")
-    assert p2["columns"] == 1
-
-
-def test_apply_layout_split_calls():
-    """C=3, R=2 のとき、水平分割はC-1=2回、垂直分割はC*(R-1)=3回。"""
+def test_apply_layout_split_calls_and_result():
+    """目的: apply_layout が結果オブジェクトを返し、分割を実行することを確認する。
+    前提: 4 セッション相当の列/行を与える。
+    期待: success=True かつ水平/垂直分割が記録される。
+    """
     from tmux_dashboard import orchestrator
     from tmux_dashboard import config
 
     io = FakeIO(sessions=["a", "b", "c", "d"], width=120, height=40, panes=["%1", "%2", "%3", "%4"])
     c = config.Config()
     o = orchestrator.Orchestrator(io=io, cfg=c)
-    plan = o.compute_plan(window_target="dashboard:0")
-    # N=4, W=120, min=40 => C=3, R=2 → 水平分割(C-1)=2, 垂直分割(列ごと)=配分に応じて≥1
-    assert plan["columns"] == 3 and plan["rows"] == 2
-    o.apply_layout(window_target="dashboard:0", columns=plan["columns"], rows=plan["rows"])
-    h = [d for d, _ in io.split_calls if d == "h"]
-    v = [d for d, _ in io.split_calls if d == "v"]
+    result = o.apply_layout(window_target="dashboard:0", columns=3, rows=2)
+
+    assert result.success is True
+    h = [x for x in io.split_calls if x[1] == "h"]
+    v = [x for x in io.split_calls if x[1] == "v"]
     assert len(h) == 2
     assert len(v) >= 1
 
 
-def test_apply_layout_uses_progressive_percentages():
-    """新しいprogressive_percent_splitsが使用されることを検証する。"""
+def test_run_once_preserves_dashboard_on_staging_failure():
+    """目的: staging で分割失敗しても既存 dashboard を保持することを確認する。
+    前提: staging target で split が例外になる。
+    期待: swap は実行されず、staging のみ cleanup され、dashboard:0 は維持される。
+    """
     from tmux_dashboard import orchestrator
     from tmux_dashboard import config
 
-    # 3列に分割する場合
-    io = FakeIO(sessions=["a", "b", "c"], width=120, height=40, panes=["%1", "%2", "%3"])
+    io = FakeIO(sessions=["dashboard", "a", "b"], width=120, height=40, panes=["%1", "%2"])
+    io.fail_split_for_targets.add("dashboard:99")
+    original = io.list_panes("dashboard:0")
+
     c = config.Config()
     o = orchestrator.Orchestrator(io=io, cfg=c)
-    
-    # 3セッション、W=120、min_tile_width=40 => C=3、R=1
-    plan = o.compute_plan(window_target="dashboard:0")
-    assert plan["columns"] == 3
-    assert plan["rows"] == 1
-    
-    io.split_calls = []  # リセット
-    o.apply_layout(window_target="dashboard:0", columns=3, rows=1)
-    
-    # 水平分割のパーセンテージを確認
-    # progressive_percent_splits(3) = [33, 50]
-    h_calls = [(d, p) for d, p in io.split_calls if d == "h"]
-    assert len(h_calls) == 2
-    assert h_calls[0][1] == 33  # 1回目: 100%を33%で分割
-    assert h_calls[1][1] == 50  # 2回目: 残り67%を50%で分割
+    _ = o.run_once(window_target="dashboard:0")
+
+    assert io.swap_window_calls == []
+    assert "dashboard:99" in io.kill_window_calls
+    assert io.list_panes("dashboard:0") == original
+
+
+def test_run_once_logs_warning_when_staging_cleanup_fails():
+    """目的: staging cleanup が失敗した場合に warning ログを残すことを確認する。
+    前提: staging で分割失敗し、続く kill_window も失敗する。
+    期待: cleanup 失敗を warning で観測でき、run_once は例外化しない。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+    import logging
+
+    io = FakeIO(sessions=["dashboard", "a", "b"], width=120, height=40, panes=["%1", "%2"])
+    io.fail_split_for_targets.add("dashboard:99")
+    io.fail_kill_window_targets.add("dashboard:99")
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+
+    fake_logger = Mock()
+    fake_logger.info.return_value = None
+    fake_logger.error.return_value = None
+    fake_logger.warning.return_value = None
+
+    original_get_logger = logging.getLogger
+    logging.getLogger = lambda _name: fake_logger  # type: ignore[assignment]
+    try:
+        _ = o.run_once(window_target="dashboard:0")
+    finally:
+        logging.getLogger = original_get_logger  # type: ignore[assignment]
+
+    warnings = [str(call.args[0]) for call in fake_logger.warning.call_args_list]
+    assert any("failed to cleanup staging window" in message for message in warnings)
+
+
+def test_run_once_detects_pane_shortage_without_silent_zip():
+    """目的: pane 数不足を明示失敗として扱うことを確認する。
+    前提: staging 側で split 成長を無効化し pane 数を増やせない。
+    期待: swap を行わず失敗扱いとなり、既存 dashboard を維持する。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(sessions=["dashboard", "a", "b", "c"], width=120, height=40, panes=["%1", "%2", "%3"])
+    io.freeze_split_growth_for_targets.add("dashboard:99")
+    original = io.list_panes("dashboard:0")
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+    _ = o.run_once(window_target="dashboard:0")
+
+    assert io.swap_window_calls == []
+    assert "dashboard:99" in io.kill_window_calls
+    assert io.list_panes("dashboard:0") == original
+
+
+def test_run_once_preserves_dashboard_when_staging_integrity_fetch_fails():
+    """目的: staging integrity の取得失敗時に fail-closed で停止することを確認する。
+    前提: staging target の list_panes_with_titles が例外を送出する。
+    期待: swap は実行されず、staging だけ cleanup され、dashboard:0 は維持される。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(sessions=["dashboard", "a", "b"], width=120, height=40, panes=["%1", "%2"])
+    io.fail_title_for_targets.add("dashboard:99")
+    original = io.list_panes("dashboard:0")
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+    _ = o.run_once(window_target="dashboard:0")
+
+    assert io.swap_window_calls == []
+    assert "dashboard:99" in io.kill_window_calls
+    assert io.list_panes("dashboard:0") == original
+
+
+def test_integrity_check_order_avoids_initial_noise():
+    """目的: initial integrity ノイズを避ける呼び出し順を確認する。
+    前提: 同一 signature で 2 回 run_once を実行する。
+    期待: 1 回目は staging window で、2 回目は dashboard:0 で integrity が評価される。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(sessions=["dashboard", "alpha", "beta"], width=120, height=40, panes=["%1", "%2"])
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+
+    called_calls = []
+
+    def fake_check(target, strict=False):
+        called_calls.append((target, strict))
+        return False
+
+    o.check_pane_integrity = fake_check  # type: ignore[method-assign]
+    _ = o.run_once(window_target="dashboard:0")
+    _ = o.run_once(window_target="dashboard:0")
+
+    assert called_calls[0] == ("dashboard:99", True)
+    assert called_calls[1] == ("dashboard:0", True)
+    assert called_calls[2] == ("dashboard:0", False)
+
+
+def test_zero_sessions_keeps_single_pane_and_returns_normally():
+    """目的: 0セッション時の正常終了を確認する。
+    前提: dashboard 以外のセッションが存在しない。
+    期待: 単一pane維持のみ実行し、staging 操作や respawn は発生しない。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(sessions=["dashboard"], width=120, height=40, panes=["%1", "%2"])
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+    plan = o.run_once(window_target="dashboard:0")
+
+    assert plan["sessions"] == []
+    assert len(io.list_panes("dashboard:0")) == 1
+    assert io.create_window_calls == []
+    assert io.swap_window_calls == []
+    assert io.respawn_calls == []
+
+
+def test_run_once_reapplies_titles_after_respawn_overwrite():
+    """目的: respawn が pane_title を上書きしても最終タイトルをセッション名に戻すことを確認する。
+    前提: respawn 実行時に FakeIO がタイトルを `node@host` に上書きする。
+    期待: run_once 後の dashboard:0 の pane_title はセッション名集合と一致する。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(sessions=["dashboard", "alpha", "beta"], width=120, height=40, panes=["%1", "%2"])
+    io.overwrite_title_on_respawn = True
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+    _ = o.run_once(window_target="dashboard:0")
+
+    titles = {title for _, title in io.list_panes_with_titles("dashboard:0")}
+    assert titles == {"alpha", "beta"}

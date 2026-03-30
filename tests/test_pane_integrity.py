@@ -7,8 +7,7 @@
 """
 
 from __future__ import annotations
-from unittest.mock import Mock, patch, call
-import subprocess
+from unittest.mock import Mock, patch
 
 
 def test_cli_driver_list_panes_with_titles():
@@ -47,33 +46,17 @@ def test_cli_driver_list_panes_with_titles():
 def test_libtmux_driver_list_panes_with_titles():
     """LibtmuxDriverがペインIDとタイトルのリストを返す。"""
     from tmux_dashboard.tmuxio import LibtmuxDriver
-    
+
     # モックセットアップ
     mock_server = Mock()
-    mock_session = Mock()
-    mock_window = Mock()
-    mock_pane1 = Mock()
-    mock_pane2 = Mock()
-    mock_pane3 = Mock()
-    
-    # pane属性設定
-    mock_pane1.id = "%0"
-    mock_pane1.pane_title = "alpha"
-    mock_pane1.cmd.return_value = Mock(stdout=["alpha"])
-    mock_pane2.id = "%1"
-    mock_pane2.pane_title = "beta"
-    mock_pane2.cmd.return_value = Mock(stdout=["beta"])
-    mock_pane3.id = "%2"
-    mock_pane3.pane_title = "gamma"
-    mock_pane3.cmd.return_value = Mock(stdout=["gamma"])
-    
-    # 関連付け
-    mock_server.sessions = [mock_session]
-    mock_session.session_name = "dashboard"  # session_name属性を使用
-    mock_session.windows = [mock_window]
-    mock_window.window_index = "0"  # window_index属性を使用
-    mock_window.panes = [mock_pane1, mock_pane2, mock_pane3]
-    
+    mock_server.cmd.return_value = Mock(
+        stdout=[
+            "%0 alpha",
+            "%1 beta",
+            "%2 gamma",
+        ]
+    )
+
     driver = LibtmuxDriver({})
     driver._server = mock_server  # _serverプロパティに設定
     
@@ -84,10 +67,17 @@ def test_libtmux_driver_list_panes_with_titles():
         ("%1", "beta"),
         ("%2", "gamma"),
     ]
+    mock_server.cmd.assert_called_once_with(
+        "list-panes",
+        "-t",
+        "dashboard:0",
+        "-F",
+        "#{pane_id} #{pane_title}",
+    )
 
 
 def test_fake_io_list_panes_with_titles():
-    """FakeIOがテスト用のペインタイトル情報を返す。"""
+    """FakeIOが初期状態のペインタイトル情報を返す。"""
     from test_orchestrator import FakeIO
     
     fake_io = FakeIO(
@@ -99,11 +89,11 @@ def test_fake_io_list_panes_with_titles():
     
     result = fake_io.list_panes_with_titles("dashboard:0")
     
-    # FakeIOの実装では session_0, session_1, ... を返す
+    # 初期状態ではタイトルは空文字
     assert result == [
-        ("%0", "session_0"),
-        ("%1", "session_1"),
-        ("%2", "session_2"),
+        ("%0", ""),
+        ("%1", ""),
+        ("%2", ""),
     ]
 
 
@@ -203,13 +193,16 @@ def test_orchestrator_check_pane_integrity_wrong_titles():
 
 
 def test_orchestrator_run_once_with_pane_integrity_check():
-    """run_once()がペイン整合性チェックを実行する。"""
+    """run_once()初回は staging へサイズ継承しつつ整合性チェックを実行する。"""
     from tmux_dashboard.orchestrator import Orchestrator
     from tmux_dashboard.config import Config
     
     mock_io = Mock()
     mock_io.list_sessions.return_value = ["alpha", "beta"]
     mock_io.window_size.return_value = (120, 40)
+    mock_io.list_windows_with_active.return_value = [(0, 1)]
+    mock_io.create_window.return_value = "dashboard:99"
+    mock_io.list_panes.return_value = ["%0", "%1"]
     mock_io.list_panes_detailed.return_value = [
         ("%0", 0, 0),
         ("%1", 60, 0),
@@ -218,6 +211,10 @@ def test_orchestrator_run_once_with_pane_integrity_check():
         ("%0", "alpha"),
         ("%1", "beta"),
     ]
+    # このテストでは respawn 経路を使わず、staging 側の整合性判定呼び出しに限定する
+    mock_io.resolve_best_pane = None
+    mock_io.resolve_active_pane = None
+    mock_io.respawn_pane = None
     
     cfg = Config()
     cfg.min_tile_width = 40
@@ -227,11 +224,34 @@ def test_orchestrator_run_once_with_pane_integrity_check():
     # check_pane_integrityをモック
     with patch.object(orch, 'check_pane_integrity', return_value=False) as mock_check:
         plan = orch.run_once()
-    
-    # ペイン整合性チェックが呼ばれる
-    mock_check.assert_called_once_with("dashboard:0")
+
+    mock_io.create_window.assert_called_once_with(
+        "dashboard",
+        99,
+        detached=True,
+        width=120,
+        height=40,
+    )
+    # 初回は staging window に対して strict モードで整合性チェックが呼ばれる
+    mock_check.assert_called_once_with("dashboard:99", strict=True)
     
     # 計画が返される
     assert plan["columns"] == 2
     assert plan["rows"] == 1
     assert plan["sessions"] == ["alpha", "beta"]
+
+
+def test_orchestrator_check_pane_integrity_strict_on_fetch_error():
+    """Orchestratorがstrictモードでタイトル取得失敗を不整合として扱う。"""
+    from tmux_dashboard.orchestrator import Orchestrator
+    from tmux_dashboard.config import Config
+
+    mock_io = Mock()
+    mock_io.list_sessions.return_value = ["dashboard"]
+    mock_io.list_panes_with_titles.side_effect = RuntimeError("boom")
+
+    cfg = Config()
+    orch = Orchestrator(mock_io, cfg)
+
+    needs_relayout = orch.check_pane_integrity("dashboard:99", strict=True)
+    assert needs_relayout is True
