@@ -23,67 +23,69 @@ This project follows a strict specification-driven development approach with a 4
 
 **Master Plan → Investigation (95%) → Requirements → Design → Implementation Plan**
 
-1. **Master Plan Analysis**: Review `@planning/master_plan.md` & `master_requirement.md` (if exists)
+1. **Master Plan Analysis**: Review `@spec-lite/current/discussions/` related investigation notes (if exists)
 2. **Code Investigation**: Investigate until 95% understanding
-3. **Requirements**: Define WHAT (`@planning/current/requirement.md`)
-4. **Design**: Define HOW after 95% understanding (`@planning/current/design.md`)
-5. **Implementation Plan**: Task checkboxes (`@planning/current/task.md`)
+3. **Requirements**: Define WHAT (`@spec-lite/current/requirement.md`)
+4. **Design**: Define HOW after 95% understanding (`@spec-lite/current/design.md`)
+5. **Implementation Plan**: Plan checkboxes (`@spec-lite/current/plan.md`)
 
 #### 2. Implementation Phase
 
 **TDD Cycle**: Red → Green → Refactor
-- Break down task.md items → TodoWrite → Implement → Update checkboxes
+- Break down plan.md items → TodoWrite → Implement → Update checkboxes
 - Record all work in report.md with timestamps
 
 #### 3. Completion Phase
 
 **QA & Documentation**
 - Run tests and linters
-- Create report (`@planning/current/report.md`)
-- Archive 4 documents to `planning/completed/YYYYMMDD_HHMM_task_name/`
+- Create report (`@spec-lite/current/report.md`)
+- Archive 4 documents to `spec-lite/completed/YYYYMMDD_HHMM_task_name/`
 
 ### Important Principles
 
 - **95% Understanding Rule**: Never proceed without 95% understanding and confidence
 - **Strict 4-Document System**: All development follows this system
 - **@ Notation References**: Maintain inter-document linkage
-- **TodoWrite Integration**: Break down task.md items into concrete work
+- **TodoWrite Integration**: Break down plan.md items into concrete work
 - **TDD First**: Always follow Test-Driven Development
 
 ## Current Development Planning
 
-See: @planning/current/requirement.md
-See: @planning/current/design.md
-See: @planning/current/task.md
-See: @planning/current/report.md
+See: @spec-lite/current/requirement.md
+See: @spec-lite/current/design.md
+See: @spec-lite/current/plan.md
+See: @spec-lite/current/report.md
+See: @spec-lite/current/discussions/
 
 ## Starting a New Task
 
 1. Copy requirement template to current:
    ```bash
-   cp planning/templates/requirement.md planning/current/requirement.md
+   cp spec-lite/templates/requirement.md spec-lite/current/requirement.md
    ```
 
 2. After requirement approval, prepare all documents:
    ```bash
-   cp planning/templates/*.md planning/current/
+   cp spec-lite/templates/*.md spec-lite/current/
    ```
 
 3. Use TodoWrite to track implementation progress
 
 4. Archive completed work:
    ```bash
-   mkdir planning/completed/$(date +%Y%m%d_%H%M)_task_name/
-   cp planning/current/*.md planning/completed/$(date +%Y%m%d_%H%M)_task_name/
+   mkdir spec-lite/completed/$(date +%Y%m%d_%H%M)_task_name/
+   cp spec-lite/current/*.md spec-lite/completed/$(date +%Y%m%d_%H%M)_task_name/
    ```
 
 ## File References
 
-When working with planning documents, use these references:
-- `@planning/current/requirement.md`
-- `@planning/current/design.md`
-- `@planning/current/task.md`
-- `@planning/current/report.md`
+When working with spec-lite documents, use these references:
+- `@spec-lite/current/requirement.md`
+- `@spec-lite/current/design.md`
+- `@spec-lite/current/plan.md`
+- `@spec-lite/current/report.md`
+- `@spec-lite/current/discussions/`
 
 ## Development Commands
 
@@ -167,7 +169,7 @@ Proactively use TodoWrite tool:
 
 ### Task Breakdown Principles
 
-Break down the minimum units from `@planning/current/task.md` into concrete coding operations:
+Break down the minimum units from `@spec-lite/current/plan.md` into concrete coding operations:
 - Which files to create/modify
 - What code to write
 - How to verify
@@ -193,7 +195,7 @@ Each TodoWrite item should be a concrete action executable in 15-30 minutes.
 # /src/           # Source code
 # /tests/         # Test files
 # /docs/          # Documentation
-# /planning/      # Spec-driven development documents
+# /spec-lite/     # Spec-driven development documents
 ```
 
 ### Dependencies

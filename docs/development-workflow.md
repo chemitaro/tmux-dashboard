@@ -6,30 +6,30 @@
 
 **マスタープラン → 調査 (95%) → 要件 → 設計 → 実装計画**
 
-1. **マスタープラン分析**: `@planning/master_plan.md` & `master_requirement.md` をレビュー（存在する場合）
+1. **マスタープラン分析**: `@spec-lite/current/discussions/` の関連調査資料をレビュー（存在する場合）
 2. **コード調査**: 95%の理解を得るまで調査
-3. **要件**: 何を作るかを定義 (`@planning/current/requirement.md`)
-4. **設計**: 95%の理解後にどう作るかを定義 (`@planning/current/design.md`)
-5. **実装計画**: タスクチェックボックス (`@planning/current/task.md`)
+3. **要件**: 何を作るかを定義 (`@spec-lite/current/requirement.md`)
+4. **設計**: 95%の理解後にどう作るかを定義 (`@spec-lite/current/design.md`)
+5. **実装計画**: タスクチェックボックス (`@spec-lite/current/plan.md`)
 
 ### 2. 実装フェーズ
 
 **TDDサイクル**: Red → Green → Refactor
-- task.md の項目を分解 → TodoWrite → 実装 → チェックボックス更新
+- plan.md の項目を分解 → TodoWrite → 実装 → チェックボックス更新
 
 ### 3. 完了フェーズ
 
 **QA & ドキュメント化**
 - テスト、リンター実行
-- レポート作成 (`@planning/current/report.md`)
-- 4つのドキュメントをアーカイブ
+- レポート作成 (`@spec-lite/current/report.md`)
+- `spec-lite/current/` の成果物をアーカイブ
 
 ## 重要な原則
 
 - **95% 理解ルール**: 95%の理解と自信なしに進まない
 - **厳格な4ドキュメントシステム**: すべての開発がこのシステムに従う
 - **@ 記法参照**: ドキュメント間のリンケージを維持
-- **TodoWrite統合**: task.md の項目を具体的な作業に分解
+- **TodoWrite統合**: plan.md の項目を具体的な作業に分解
 
 ## 実装プロセス詳細
 
@@ -78,7 +78,7 @@
 4. リスク評価
 
 #### 出力
-- 詳細な task.md
+- 詳細な plan.md
 
 ### ステップ4: TDD実装
 
@@ -132,7 +132,7 @@
 - 学んだことの記録
 
 #### アーカイブ
-- 4つのドキュメントを一緒に保存
+- `spec-lite/current/` の成果物を一緒に保存
 - 適切な命名規則に従う
 - 将来の参照のために整理
 
@@ -205,7 +205,7 @@ graph TD
 2. **明確なコミットメッセージ**: 変更の理由を説明
 3. **継続的な文書化**: コードと並行してドキュメントを更新
 4. **定期的なレビュー**: 定期的に進捗を確認
-5. **学習の共有**: report.md の学びをチームと共有
+5. **学習の共有**: report.md と discussions の学びをチームと共有
 
 ## まとめ
 

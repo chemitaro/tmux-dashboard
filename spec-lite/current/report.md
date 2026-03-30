@@ -1,46 +1,50 @@
 ---
 種別: 実装報告書
-機能ID: "<FEATURE_ID>"
-機能名: "<FEATURE_NAME>"
-関連Issue: ["<ISSUE_NUMBER_OR_URL>"]
-状態: "draft | approved"
-作成者: "<YOUR_NAME>"
-最終更新: "YYYY-MM-DD"
+機能ID: "migration-spec-lite"
+機能名: "planning から spec-lite への移行"
+関連Issue: ["調査レポート起点の運用移行"]
+状態: "draft"
+作成者: "codex"
+最終更新: "2026-03-30"
 依存: ["requirement.md", "design.md", "plan.md"]
 ---
 
-# <FEATURE_ID> <FEATURE_NAME> — 実装報告（LOG）
+# migration-spec-lite planning から spec-lite への移行 — 実装報告（LOG）
 
 ## 実装サマリー (任意)
-- [実装した内容の概要を2-3文で記載]
+- 旧 `planning/` ベースの運用から `spec-lite/` ベース運用へ移行するため、今回の調査レポートを `spec-lite/current/discussions/` に作成した。
+- 以後の作業記録は `spec-lite/current/report.md` を正本とし、旧 `planning/` の成果物は `spec-lite/completed/` へアーカイブして退役させる。
 
 ## 実装記録（セッションログ） (必須)
 
-### YYYY-MM-DD HH:MM - HH:MM
+### 2026-03-30 18:40 - 18:50
 
 #### 対象
-- Step: S01, S02, ...
-- AC/EC: AC-___, EC-___
+- Step: 移行準備
+- AC/EC: 該当なし
 
 #### 実施内容
-- ...
+- `spec-lite` ディレクトリ構成とガイドを確認した。
+- 旧 `planning/` の調査成果を引き継ぐため、`spec-lite/current/discussions/tmux-split-window-headless-analysis.md` を新規作成した。
+- 旧運用の退役とドキュメント移行は別作業として進行中。
 
 #### 実行コマンド / 結果
 ```bash
-<command>
+sed -n '1,220p' spec-lite/docs/spec-lite-guide.md
+sed -n '1,220p' spec-lite/current/discussions/_template.md
 
-<result>
+# spec-lite ガイドと discussions テンプレートを確認
 ```
 
 #### 変更したファイル
-- `path/to/file1` - ...
-- `path/to/file2` - ...
+- `spec-lite/current/discussions/tmux-split-window-headless-analysis.md` - 今回の調査レポートを作成
+- `spec-lite/current/report.md` - spec-lite 運用開始の初回ログを記録
 
 #### コミット
-- <hash> <message>
+- 該当なし
 
 #### メモ
-- ...
+- planning 退役とドキュメント更新の完了後、この report を継続利用する。
 
 ---
 
