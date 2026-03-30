@@ -12,15 +12,36 @@ tmux-dashboard
 
 Usage:
   tmux-dashboard [--config PATH]
+  tmux-dashboard -h | --help
 
-Behavior:
+Wrapper options:
+  --config PATH   Pass this config path to the internal runner.
+  -h, --help      Show this help.
+
+Wrapper behavior:
   - Ensures the tmux session "dashboard" exists
-  - Starts the tmux-dashboard runner in a separate window (so it won't manage itself)
-  - Switches/attaches to the dashboard window
+  - Ensures the visible dashboard window exists
+  - Starts/respawns the internal runner in "__tmux_dashboard_runner__"
+  - Switches/attaches the client to the dashboard window
+
+Internal runner:
+  - This wrapper launches:
+      uv run --no-sync python -m tmux_dashboard --window-target dashboard:<index> [--config PATH]
+  - Runner options (when running it directly):
+      --once
+      --iterations N
+      --window-target TARGET
+      --config PATH
+
+Examples:
+  ./tmux-dashboard
+  ./tmux-dashboard --config ./configs/default.yaml
+  uv run python -m tmux_dashboard --config ./configs/default.yaml --once --iterations 1 --window-target dashboard:0
 
 Notes:
   - Dependencies are expected to be installed at install time (via `uv sync --locked`).
-  - The runner runs inside the "dashboard" session, so killing that session stops it.
+  - The wrapper only accepts --config and -h/--help.
+  - To use runner-only flags like --once/--iterations, run `python -m tmux_dashboard` directly.
 EOF
 }
 
