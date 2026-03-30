@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import types
+import pytest
 
 
 def _fake_completed(stdout: str):
@@ -235,7 +236,7 @@ def test_libtmux_respects_socket_options(monkeypatch):
 
 
 def test_cli_panes_and_split_commands(monkeypatch):
-    """CLIドライバの list-panes / kill-pane -a / split-window のコマンドを検証する。"""
+    """CLIドライバの list-panes / kill-pane -a / split-window(-l) を検証する。"""
     from tmux_dashboard import tmuxio
     from tmux_dashboard import config
 
@@ -260,14 +261,25 @@ def test_cli_panes_and_split_commands(monkeypatch):
     io.kill_other_panes("dashboard:0")
     assert any("kill-pane -a -t dashboard:0" in x for x in issued)
 
+    io.split_window("dashboard:0", direction="h", length="40")
+    assert any("split-window -h -l 40 -t dashboard:0.0" in x for x in issued)
+    io.split_window("dashboard:0", direction="v", length="50%")
+    assert any("split-window -v -l 50% -t dashboard:0.0" in x for x in issued)
+    # 既存呼び出し互換: percent 指定は `%` へ変換される
     io.split_window("dashboard:0", direction="h", percent=33)
-    assert any("split-window -h -p 33 -t dashboard:0" in x for x in issued)
-    io.split_window("dashboard:0", direction="v", percent=50)
-    assert any("split-window -v -p 50 -t dashboard:0" in x for x in issued)
+    assert any("split-window -h -l 33% -t dashboard:0.0" in x for x in issued)
+
+    io.split_pane("%1", direction="h", length="12")
+    assert any("split-window -h -l 12 -t %1" in x for x in issued)
+    io.split_pane("%1", direction="v", length="60%")
+    assert any("split-window -v -l 60% -t %1" in x for x in issued)
+    # 既存呼び出し互換: percent 指定は `%` へ変換される
+    io.split_pane("%1", direction="h", percent=45)
+    assert any("split-window -h -l 45% -t %1" in x for x in issued)
 
 
 def test_libtmux_panes_and_split_calls():
-    """libtmuxドライバの list_panes / kill_other_panes / split_window 呼び出しを検証する。"""
+    """libtmuxドライバの list_panes / kill_other_panes / split_window(-l) を検証する。"""
     from tmux_dashboard import tmuxio
     from tmux_dashboard import config
 
@@ -316,7 +328,71 @@ def test_libtmux_panes_and_split_calls():
     # server.cmd 経由で呼び出される
     assert ["kill-pane", "-a", "-t", "dashboard:0.0"] in server_calls
 
-    io.split_window("dashboard:0", direction="h", percent=25)
-    assert ["split-window", "-h", "-p", "25", "-t", "dashboard:0.0"] in server_calls
-    io.split_window("dashboard:0", direction="v", percent=75)
-    assert ["split-window", "-v", "-p", "75", "-t", "dashboard:0.0"] in server_calls
+    io.split_window("dashboard:0", direction="h", length="25")
+    assert ["split-window", "-h", "-l", "25", "-t", "dashboard:0.0"] in server_calls
+    io.split_window("dashboard:0", direction="v", length="75%")
+    assert ["split-window", "-v", "-l", "75%", "-t", "dashboard:0.0"] in server_calls
+    # 既存呼び出し互換: percent 指定は `%` へ変換される
+    io.split_window("dashboard:0", direction="h", percent=40)
+    assert ["split-window", "-h", "-l", "40%", "-t", "dashboard:0.0"] in server_calls
+
+    io.split_pane("%A", direction="h", length="10")
+    assert ["split-window", "-h", "-l", "10", "-t", "%A"] in server_calls
+    io.split_pane("%A", direction="v", length="65%")
+    assert ["split-window", "-v", "-l", "65%", "-t", "%A"] in server_calls
+    # 既存呼び出し互換: percent 指定は `%` へ変換される
+    io.split_pane("%A", direction="h", percent=35)
+    assert ["split-window", "-h", "-l", "35%", "-t", "%A"] in server_calls
+
+
+def test_cli_split_raises_value_error_when_length_and_percent_missing(monkeypatch):
+    """目的: CLI経路の split 系入力検証を確認する。
+    前提: length と percent をどちらも渡さない。
+    期待: split_window / split_pane が ValueError を送出し、tmuxコマンドは実行されない。
+    """
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    def fake_run(args, capture_output=True, check=True):
+        raise AssertionError("split入力エラー時にtmux実行が呼ばれてはいけない")
+
+    monkeypatch.setattr(tmuxio, "_run_subprocess", fake_run)
+
+    c = config.load_config(None)
+    c.tmux.driver = "cli"
+    io = tmuxio.create_from_config(c)
+
+    with pytest.raises(ValueError):
+        io.split_window("dashboard:0", direction="h")
+    with pytest.raises(ValueError):
+        io.split_pane("%1", direction="v")
+
+
+def test_libtmux_split_raises_value_error_when_length_and_percent_missing():
+    """目的: libtmux経路の split 系入力検証を確認する。
+    前提: length と percent をどちらも渡さない。
+    期待: split_window / split_pane が ValueError を送出し、server.cmd は呼ばれない。
+    """
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    server_calls = []
+
+    class FakeServer:
+        def cmd(self, *args):
+            server_calls.append(list(args))
+            class R:
+                stdout = [""]
+            return R()
+
+    c = config.load_config(None)
+    c.tmux.driver = "libtmux"
+    io = tmuxio.create_from_config(c)
+    io.driver._server = FakeServer()  # type: ignore[attr-defined]
+
+    with pytest.raises(ValueError):
+        io.split_window("dashboard:0", direction="h")
+    with pytest.raises(ValueError):
+        io.split_pane("%A", direction="v")
+
+    assert server_calls == []

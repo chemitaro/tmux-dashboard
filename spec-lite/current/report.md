@@ -1,19 +1,19 @@
 ---
 種別: 実装報告書
-機能ID: "migration-spec-lite"
-機能名: "planning から spec-lite への移行"
-関連Issue: ["調査レポート起点の運用移行"]
+機能ID: "fix-tmux-headless-layout"
+機能名: "headless tmux でのレイアウト復旧"
+関連Issue: ["tmux split-window headless failure analysis"]
 状態: "draft"
 作成者: "codex"
 最終更新: "2026-03-30"
 依存: ["requirement.md", "design.md", "plan.md"]
 ---
 
-# migration-spec-lite planning から spec-lite への移行 — 実装報告（LOG）
+# fix-tmux-headless-layout headless tmux でのレイアウト復旧 — 実装報告（LOG）
 
 ## 実装サマリー (任意)
-- 旧 `planning/` ベースの運用から `spec-lite/` ベース運用へ移行するため、今回の調査レポートを `spec-lite/current/discussions/` に作成した。
-- 以後の作業記録は `spec-lite/current/report.md` を正本とし、旧 `planning/` の成果物は `spec-lite/completed/` へアーカイブして退役させる。
+- headless tmux で `split-window -p` が失敗する問題に対し、S01 では `-l` ベースの分割長算出と split API を導入した。
+- 先行して行った `planning` から `spec-lite` への運用移行も、この report に前史ログとして保持している。
 
 ## 実装記録（セッションログ） (必須)
 
@@ -153,6 +153,46 @@ sed -n '90,260p' spec-lite/current/design.md
 
 #### メモ
 - 有効な `review_status` を返す spec reviewer 応答を回収中。
+
+---
+
+### 2026-03-30 19:20 - 19:55
+
+#### 対象
+- Step: S01
+- AC/EC: AC-001 / EC-004
+
+#### 実施内容
+- `layout.py` に `build_split_lengths()` を追加し、headless 向け split 長算出を absolute-cell 既定、`length <= 0` 時のみ `%` fallback として実装した。
+- `tmuxio.py` の CLI / libtmux 両経路で `split-window -l` を使うように変更し、公開 IF では `length` を主契約としつつ `percent` 互換も維持した。
+- `tests/test_layout.py` と `tests/test_tmuxio.py` を Red → Green で更新し、正常系に加えて `length` / `percent` 未指定時の `ValueError` 失敗系も追加した。
+- `code_reviewer` と `qa_reviewer` のレビューを実施し、初回 QA 指摘だった失敗系テスト不足を是正後、fresh review で両方 `pass` を確認した。
+
+#### 実行コマンド / 結果
+```bash
+uv run pytest tests/test_layout.py tests/test_tmuxio.py -q
+# 16 passed in 0.03s
+
+uv run pytest tests/test_tmuxio.py -q
+# 10 passed in 0.03s
+
+uv run pytest tests/test_layout.py tests/test_tmuxio.py -q
+# 18 passed in 0.03s
+```
+
+#### 変更したファイル
+- `tmux_dashboard/layout.py` - `-l` 向けの分割長算出 helper を追加
+- `tmux_dashboard/tmuxio.py` - CLI / libtmux の split API を `length` 契約へ移行し `-l` を使用
+- `tests/test_layout.py` - 分割長算出の正常系 / fallback 系テストを追加
+- `tests/test_tmuxio.py` - CLI / libtmux 両経路の `-l` 呼び出しと未指定失敗系を検証
+- `spec-lite/current/report.md` - S01 の実装 / 検証 / レビュー結果を追記
+- `spec-lite/current/plan.md` - S01 進行状態を更新
+
+#### コミット
+- 未実施（このログ記録後に S01 スコープでコミット予定）
+
+#### メモ
+- 初回 QA は `review_status: pass` だったが non-blocking finding として失敗系テスト不足を指摘したため、ユーザー指示に従って是正後に fresh review を再実施した。
 
 ---
 

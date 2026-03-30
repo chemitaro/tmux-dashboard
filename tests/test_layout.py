@@ -128,3 +128,26 @@ def test_progressive_percent_splits_simulation():
     assert len(panes_5) == 5
     expected_5 = 100.0 / 5
     assert all(abs(p - expected_5) < 1.0 for p in panes_5)  # ほぼ20%ずつ
+
+
+def test_build_split_lengths_uses_absolute_cells_by_default():
+    """`-l` 用分割長は既定で absolute-cell 文字列を返す。
+
+    入力幅と分割数から、分割操作回数分（segments-1）のセル長が返ることを確認する。
+    """
+    lengths = layout.build_split_lengths(total=120, segments=3)
+    assert lengths == ["40", "40"]
+
+
+def test_build_split_lengths_fallbacks_to_percent_when_non_positive():
+    """算出セル長が0以下の場合のみ `%` 指定へフォールバックする。
+
+    極小幅で分割数が多い場合に `%` 文字列が返ることを確認する。
+    """
+    lengths = layout.build_split_lengths(total=2, segments=5)
+    assert lengths == ["20%", "25%", "33%", "1"]
+
+
+def test_build_split_lengths_handles_single_segment():
+    """分割不要（segments<=1）では空配列を返す。"""
+    assert layout.build_split_lengths(total=100, segments=1) == []
