@@ -1,0 +1,85 @@
+name: spec-lite close
+
+# Runs `spec-lite close` on default branches.
+# If `spec-lite/current` diverges from templates, it runs `spec-lite/scripts/spec-lite-close.sh`
+# to restore template state and auto-commits the changes.
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  spec_lite_close:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TARGET_BRANCH: ${{ github.ref_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Evaluate commit message for close skip
+        id: close_guard
+        run: |
+          should_run=true
+
+          # push-only skip check. workflow_dispatch has no head_commit.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            if echo "${{ github.event.head_commit.message }}" | grep -q '\[skip spec-lite-close\]'; then
+              echo "::notice::Skip spec-lite close due to [skip spec-lite-close] token."
+              should_run=false
+            fi
+          fi
+
+          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
+
+      - name: Run spec-lite-close
+        id: run_close
+        if: steps.close_guard.outputs.should_run == 'true'
+        run: |
+          chmod +x spec-lite/scripts/spec-lite-close.sh
+          set -o pipefail
+          ./spec-lite/scripts/spec-lite-close.sh | tee /tmp/spec-lite-close.log
+          status=$(grep -F 'SPEC_LITE_CLOSE_STATUS=' /tmp/spec-lite-close.log | tail -n1 | cut -d= -f2-)
+          message=$(grep -F 'SPEC_LITE_CLOSE_MESSAGE=' /tmp/spec-lite-close.log | tail -n1 | cut -d= -f2-)
+          archive_dir=$(grep -F 'SPEC_LITE_CLOSE_ARCHIVE_DIR=' /tmp/spec-lite-close.log | tail -n1 | cut -d= -f2-)
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "message=$message" >> "$GITHUB_OUTPUT"
+          echo "archive_dir=$archive_dir" >> "$GITHUB_OUTPUT"
+          echo "::notice::spec-lite close status: $status ($message)"
+
+      - name: Detect spec-lite differences
+        id: diff_check
+        if: steps.close_guard.outputs.should_run == 'true'
+        run: |
+          if git status --porcelain spec-lite | grep -q .; then
+            echo "has_diff=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Auto commit spec-lite changes
+        if: steps.close_guard.outputs.should_run == 'true' && steps.diff_check.outputs.has_diff == 'true'
+        run: |
+          git config user.name "spec-lite-close-bot"
+          git config user.email "spec-lite-close-bot@users.noreply.github.com"
+          git add spec-lite
+          git commit -m "[skip spec-lite-close] chore: spec-lite close (branch: ${TARGET_BRANCH})"
+          git push origin HEAD:${TARGET_BRANCH}
+          echo "::notice::spec-lite close committed spec-lite changes to ${TARGET_BRANCH}."
+
+      - name: Notify manual action on failure
+        if: failure()
+        run: |
+          echo "::error::spec-lite close failed for ${TARGET_BRANCH}. Check logs above, then run './spec-lite/scripts/spec-lite-close.sh' locally and push to ${TARGET_BRANCH}."
