@@ -103,19 +103,45 @@ class CliDriver:
         """対象ウィンドウで現在のペイン以外を全て閉じる。"""
         _run_subprocess(["tmux", "kill-pane", "-a", "-t", window_target])
 
-    def split_window(self, window_target: str, direction: str, percent: int) -> None:
+    def _normalize_split_length(self, length: str | int | None, percent: int | None) -> str:
+        """split-window の -l に渡す長さ文字列を正規化する。"""
+        if length is None:
+            if percent is None:
+                raise ValueError("split length is required")
+            return f"{percent}%"
+        if isinstance(length, int):
+            return str(length)
+        return length
+
+    def split_window(
+        self,
+        window_target: str,
+        direction: str,
+        length: str | int | None = None,
+        *,
+        percent: int | None = None,
+    ) -> None:
         """指定方向に分割する。direction: 'h'（水平）/ 'v'（垂直）。"""
         flag = "-h" if direction == "h" else "-v"
         # pane を明示（.0）: クライアント非接続でも対象を特定できるようにする
         target = f"{window_target}.0"
-        _run_subprocess(["tmux", "split-window", flag, "-p", str(percent), "-t", target])
+        split_length = self._normalize_split_length(length, percent)
+        _run_subprocess(["tmux", "split-window", flag, "-l", split_length, "-t", target])
 
     def select_pane(self, pane_id: str) -> None:
         _run_subprocess(["tmux", "select-pane", "-t", pane_id])
 
-    def split_pane(self, pane_id: str, direction: str, percent: int) -> None:
+    def split_pane(
+        self,
+        pane_id: str,
+        direction: str,
+        length: str | int | None = None,
+        *,
+        percent: int | None = None,
+    ) -> None:
         flag = "-h" if direction == "h" else "-v"
-        _run_subprocess(["tmux", "split-window", flag, "-p", str(percent), "-t", pane_id])
+        split_length = self._normalize_split_length(length, percent)
+        _run_subprocess(["tmux", "split-window", flag, "-l", split_length, "-t", pane_id])
 
     def list_panes_detailed(self, window_target: str) -> list[tuple[str, int, int]]:
         cp = _run_subprocess(["tmux", "list-panes", "-t", window_target, "-F", "#{pane_id} #{pane_left} #{pane_top}"])
@@ -443,21 +469,47 @@ class LibtmuxDriver:
         server.cmd("select-window", "-t", window_target)  # type: ignore[attr-defined]
         server.cmd("kill-pane", "-a", "-t", target)  # type: ignore[attr-defined]
 
-    def split_window(self, window_target: str, direction: str, percent: int) -> None:
+    def _normalize_split_length(self, length: str | int | None, percent: int | None) -> str:
+        """split-window の -l に渡す長さ文字列を正規化する。"""
+        if length is None:
+            if percent is None:
+                raise ValueError("split length is required")
+            return f"{percent}%"
+        if isinstance(length, int):
+            return str(length)
+        return length
+
+    def split_window(
+        self,
+        window_target: str,
+        direction: str,
+        length: str | int | None = None,
+        *,
+        percent: int | None = None,
+    ) -> None:
         server = self._ensure_server()
         flag = "-h" if direction == "h" else "-v"
         target = f"{window_target}.0"
+        split_length = self._normalize_split_length(length, percent)
         server.cmd("select-window", "-t", window_target)  # type: ignore[attr-defined]
-        server.cmd("split-window", flag, "-p", str(percent), "-t", target)  # type: ignore[attr-defined]
+        server.cmd("split-window", flag, "-l", split_length, "-t", target)  # type: ignore[attr-defined]
 
     def select_pane(self, pane_id: str) -> None:
         server = self._ensure_server()
         server.cmd("select-pane", "-t", pane_id)  # type: ignore[attr-defined]
 
-    def split_pane(self, pane_id: str, direction: str, percent: int) -> None:
+    def split_pane(
+        self,
+        pane_id: str,
+        direction: str,
+        length: str | int | None = None,
+        *,
+        percent: int | None = None,
+    ) -> None:
         server = self._ensure_server()
         flag = "-h" if direction == "h" else "-v"
-        server.cmd("split-window", flag, "-p", str(percent), "-t", pane_id)  # type: ignore[attr-defined]
+        split_length = self._normalize_split_length(length, percent)
+        server.cmd("split-window", flag, "-l", split_length, "-t", pane_id)  # type: ignore[attr-defined]
 
     def list_panes_detailed(self, window_target: str) -> list[tuple[str, int, int]]:
         server = self._ensure_server()
@@ -679,17 +731,31 @@ class TmuxIO:
         """対象ウィンドウで現在のペイン以外を全て閉じる。"""
         return self.driver.kill_other_panes(window_target)
 
-    def split_window(self, window_target: str, direction: str, percent: int) -> None:
+    def split_window(
+        self,
+        window_target: str,
+        direction: str,
+        length: str | int | None = None,
+        *,
+        percent: int | None = None,
+    ) -> None:
         """指定方向に分割する。direction: 'h'（水平）/ 'v'（垂直）。"""
-        return self.driver.split_window(window_target, direction, percent)
+        return self.driver.split_window(window_target, direction, length, percent=percent)
 
     def select_pane(self, pane_id: str) -> None:
         """対象の pane を選択する。"""
         return self.driver.select_pane(pane_id)
 
-    def split_pane(self, pane_id: str, direction: str, percent: int) -> None:
+    def split_pane(
+        self,
+        pane_id: str,
+        direction: str,
+        length: str | int | None = None,
+        *,
+        percent: int | None = None,
+    ) -> None:
         """対象の pane を分割する。"""
-        return self.driver.split_pane(pane_id, direction, percent)
+        return self.driver.split_pane(pane_id, direction, length, percent=percent)
 
     def list_panes_detailed(self, window_target: str) -> list[tuple[str, int, int]]:
         """pane の (id, left, top) を返す。"""

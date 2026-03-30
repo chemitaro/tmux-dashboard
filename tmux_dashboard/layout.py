@@ -3,6 +3,7 @@
 機能:
 - 列/行数の決定
 - 百分率分割（末尾で端数吸収）
+- `split-window -l` 向け分割長算出
 - 列優先マッピング（上→下、左→右）でN個のタイル位置を返す
 """
 
@@ -81,6 +82,34 @@ def progressive_percent_splits(parts: int) -> List[int]:
         percentages.append(percent)
     
     return percentages
+
+
+def build_split_lengths(total: int, segments: int) -> List[str]:
+    """`split-window -l` 向けの分割長を返す。
+
+    仕様:
+    - 既定は absolute-cell 指定（整数文字列）を返す。
+    - 計算結果が 0 以下のときのみ `%` 指定へフォールバックする。
+    - 戻り値は分割操作回数分（`segments - 1` 個）。
+    """
+    if segments <= 1:
+        return []
+
+    remaining_total = total
+    lengths: List[str] = []
+
+    for remaining_parts in range(segments, 1, -1):
+        cell_len = remaining_total // remaining_parts
+        if cell_len <= 0:
+            # 0以下になった場合のみ%指定へフォールバック
+            fallback_pct = max(1, 100 // remaining_parts)
+            lengths.append(f"{fallback_pct}%")
+            continue
+
+        lengths.append(str(cell_len))
+        remaining_total -= cell_len
+
+    return lengths
 
 
 def tile_positions(n: int, columns: int, rows: int) -> List[Tuple[int, int]]:
