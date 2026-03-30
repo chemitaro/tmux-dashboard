@@ -155,8 +155,7 @@ def test_e2e_many_sessions_grid_exact(tmp_path):
 
     titles = _pane_titles("dashboard:0")
     panes = _pane_widths("dashboard:0")
-    if len(panes) != 8:
-        pytest.xfail("Headless tmux may not support split-window without client; pane count != expected")
+    assert len(panes) == 8
     # タイトルは少なくとも全セッション名を含む
     for n in names:
         assert n in titles
@@ -201,11 +200,9 @@ def test_e2e_resize_up_and_down(tmp_path):
     # 幅120 → columns=3, rows=2 → panes=6
     _sh(["tmux", "resize-window", "-t", "dashboard:0", "-x", "120", "-y", "40"])
     _run_dashboard_once("dashboard:0", config_path=str(cfg))
-    if len(_pane_widths("dashboard:0")) != 6:
-        pytest.xfail("Headless tmux may not support split-window; pane count mismatch")
+    assert len(_pane_widths("dashboard:0")) == 6
 
     # 幅79 → columns=1, rows=6 → panes=6
     _sh(["tmux", "resize-window", "-t", "dashboard:0", "-x", "79", "-y", "40"])
     _run_dashboard_once("dashboard:0", config_path=str(cfg))
-    if len(_pane_widths("dashboard:0")) != 6:
-        pytest.xfail("Headless tmux may not support split-window; pane count mismatch")
+    assert len(_pane_widths("dashboard:0")) == 6

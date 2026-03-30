@@ -72,8 +72,12 @@ class Orchestrator:
         except Exception:
             return self.io.list_panes(window_target)
 
-    def validate_mapping(self, tiles: List[str], sessions: List[str]) -> None:
+    def validate_mapping(self, tiles: List[str], sessions: List[str], *, exact: bool = False) -> None:
         """tile 数と session 数の整合を検証する。"""
+        if exact and len(tiles) != len(sessions):
+            raise RuntimeError(
+                f"pane mismatch: tiles={len(tiles)} sessions={len(sessions)}"
+            )
         if len(tiles) < len(sessions):
             raise RuntimeError(
                 f"pane shortage: tiles={len(tiles)} sessions={len(sessions)}"
@@ -88,7 +92,13 @@ class Orchestrator:
             idx += 1
         return idx
 
-    def apply_layout(self, window_target: str, columns: int, rows: int) -> LayoutApplyResult:
+    def apply_layout(
+        self,
+        window_target: str,
+        columns: int,
+        rows: int,
+        sessions: List[str] | None = None,
+    ) -> LayoutApplyResult:
         """グリッド分割を適用し、結果を返す。
 
         失敗は例外送出せず `LayoutApplyResult` で返す。
@@ -104,8 +114,8 @@ class Orchestrator:
                 self.io.split_window(window_target, direction="h", percent=h_perc[i])
 
             # 2) 列ごとの行分割（垂直）
-            sessions = self.scan_sessions()
-            N = len(sessions)
+            stable_sessions = sessions if sessions is not None else self.scan_sessions()
+            N = len(stable_sessions)
             base = N // columns
             rem = N % columns
             rows_per_col = [base + (1 if c < rem else 0) for c in range(columns)]
@@ -135,6 +145,11 @@ class Orchestrator:
         except Exception as e:
             return LayoutApplyResult(success=False, pane_ids=[], error_message=str(e))
 
+    def validate_staging_structure(self, window_target: str, sessions: List[str]) -> None:
+        """staging 昇格前に pane 構造を検証する。"""
+        panes_sorted = self._sorted_panes(window_target)
+        self.validate_mapping(panes_sorted, sessions, exact=True)
+
     def apply_titles(self, window_target: str, sessions: List[str]) -> None:
         """pane border を有効化し、pane_title にセッション名を割り当てる。"""
         # ボーダーを上部にし、タイトルは pane_title を表示
@@ -145,7 +160,13 @@ class Orchestrator:
         for pane_id, name in zip(panes_sorted, sessions):
             self.io.set_pane_title(pane_id, name)
     
-    def check_pane_integrity(self, window_target: str, *, strict: bool = False) -> bool:
+    def check_pane_integrity(
+        self,
+        window_target: str,
+        *,
+        strict: bool = False,
+        invalidate_signature: bool = True,
+    ) -> bool:
         """ペインタイトルの整合性を確認し、不一致なら再レイアウトが必要。
         
         Returns:
@@ -176,8 +197,9 @@ class Orchestrator:
                 sorted(expected_sessions),
                 sorted(actual_titles)
             )
-            # _last_signatureをリセットして次回強制的に再レイアウト
-            self._last_signature = None
+            # 呼び出し元の意図に応じて、次回再レイアウトを予約する。
+            if invalidate_signature:
+                self._last_signature = None
             return True
         
         return False
@@ -253,13 +275,17 @@ class Orchestrator:
                     height=H,
                 )
 
-                result = self.apply_layout(staging_target, plan["columns"], plan["rows"])
+                result = self.apply_layout(
+                    staging_target,
+                    plan["columns"],
+                    plan["rows"],
+                    sessions=sessions,
+                )
                 if not result.success:
                     raise RuntimeError(result.error_message or "layout apply failed")
 
                 self.apply_titles(staging_target, sessions)
-                if self.check_pane_integrity(staging_target, strict=True):
-                    raise RuntimeError("pane integrity check failed on staging window")
+                self.validate_staging_structure(staging_target, sessions)
 
                 self.io.swap_window(staging_target, window_target)
                 # swap 後、staging target 側に旧 dashboard:0 が来る
@@ -321,7 +347,11 @@ class Orchestrator:
             # respawn で pane_title が上書きされる環境があるため、最後に再適用する。
             self.apply_titles(window_target, sessions)
             # 起動直後にタイトルが再上書きされるケースに備え、短時間待って再適用する。
-            if self.check_pane_integrity(window_target, strict=True):
+            if self.check_pane_integrity(
+                window_target,
+                strict=True,
+                invalidate_signature=False,
+            ):
                 time.sleep(0.05)
                 self.apply_titles(window_target, sessions)
         try:

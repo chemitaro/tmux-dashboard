@@ -193,7 +193,7 @@ def test_orchestrator_check_pane_integrity_wrong_titles():
 
 
 def test_orchestrator_run_once_with_pane_integrity_check():
-    """run_once()初回は staging へサイズ継承しつつ整合性チェックを実行する。"""
+    """run_once()初回は staging へサイズ継承しつつ構造検証を実行する。"""
     from tmux_dashboard.orchestrator import Orchestrator
     from tmux_dashboard.config import Config
     
@@ -211,7 +211,7 @@ def test_orchestrator_run_once_with_pane_integrity_check():
         ("%0", "alpha"),
         ("%1", "beta"),
     ]
-    # このテストでは respawn 経路を使わず、staging 側の整合性判定呼び出しに限定する
+    # このテストでは respawn 経路を使わず、staging 側の構造検証呼び出しに限定する
     mock_io.resolve_best_pane = None
     mock_io.resolve_active_pane = None
     mock_io.respawn_pane = None
@@ -221,9 +221,10 @@ def test_orchestrator_run_once_with_pane_integrity_check():
     
     orch = Orchestrator(mock_io, cfg)
     
-    # check_pane_integrityをモック
-    with patch.object(orch, 'check_pane_integrity', return_value=False) as mock_check:
-        plan = orch.run_once()
+    # staging 構造検証と integrity 判定をモック
+    with patch.object(orch, 'validate_staging_structure', return_value=None) as mock_validate:
+        with patch.object(orch, 'check_pane_integrity', return_value=False) as mock_check:
+            plan = orch.run_once()
 
     mock_io.create_window.assert_called_once_with(
         "dashboard",
@@ -232,8 +233,10 @@ def test_orchestrator_run_once_with_pane_integrity_check():
         width=120,
         height=40,
     )
-    # 初回は staging window に対して strict モードで整合性チェックが呼ばれる
-    mock_check.assert_called_once_with("dashboard:99", strict=True)
+    # 初回は staging window に対して構造検証が呼ばれる
+    mock_validate.assert_called_once_with("dashboard:99", ["alpha", "beta"])
+    # respawn 経路を無効化しているため、integrity 判定は呼ばれない
+    mock_check.assert_not_called()
     
     # 計画が返される
     assert plan["columns"] == 2
