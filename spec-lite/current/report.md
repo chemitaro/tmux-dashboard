@@ -199,6 +199,47 @@ uv run pytest tests/test_layout.py tests/test_tmuxio.py -q
 
 ### 2026-03-30 20:00 - 23:40
 
+### 2026-03-31 00:00 - 00:25
+
+#### 対象
+- Step: wrapper 障害調査
+- AC/EC: 調査タスクのため該当なし
+
+#### 実施内容
+- `./tmux-dashboard` 経由では依然として `dashboard:0` が 1 pane のまま残ることを実環境で再現した。
+- runner log の `pane shortage: tiles=0 sessions=3` を起点に、staging window 作成から pane 列挙までを切り分けた。
+- `LibtmuxDriver.create_window()` を独立ソケットで直接観測し、`dashboard:99` を返すのに実際には window が作成されていないことを確認した。
+- raw tmux 実験により、`tmux new-window -t dashboard` は session 名と window 名がどちらも `dashboard` の場合に `create window failed: index 0 in use` で失敗し、`-t dashboard:99` なら成功することを確認した。
+- 以上から、本質原因は `create_window()` が `-t session_name` を使っていること、および wrapper が visible window を `dashboard` と命名して session/window 同名条件を作っていることだと特定した。
+- 調査結果は `spec-lite/current/discussions/wrapper-create-window-root-cause-20260331.md` にまとめた。
+
+#### 実行コマンド / 結果
+```bash
+./tmux-dashboard
+# wrapper 経由で runner log に以下を確認:
+# non-destructive apply failed: pane shortage: tiles=0 sessions=3
+
+tmux -L "$sock" new-session -d -s dashboard -n dashboard
+tmux -L "$sock" new-window -d -P -F '#{session_name}:#{window_index}' -t dashboard
+# status=1
+# out=create window failed: index 0 in use
+
+tmux -L "$sock" new-session -d -s dashboard
+tmux -L "$sock" new-window -d -P -F '#{session_name}:#{window_index}' -t dashboard
+# status=0
+# out=dashboard:1
+```
+
+#### 変更したファイル
+- `spec-lite/current/discussions/wrapper-create-window-root-cause-20260331.md` - wrapper 経路の一次原因と再現条件を整理した調査レポート
+- `spec-lite/current/report.md` - 本調査ログを追記
+
+#### コミット
+- 該当なし
+
+#### メモ
+- 既存の direct runner E2E は `tmux new-session -d -s dashboard` を使っており、window 名が既定の `zsh` のため wrapper 固有の同名条件を再現していなかった。
+
 #### 対象
 - Step: S02
 - AC/EC: AC-002, AC-003, AC-004 / EC-001, EC-002, EC-003
@@ -299,6 +340,52 @@ uv run pytest -q
 
 #### メモ
 - `dynamic_add_then_remove` には headless 条件での動的 `xfail` 分岐がまだ残るが、今回の S03 受け入れ条件で対象としていた 2 ケースの通常検証化は達成した。
+
+---
+
+### 2026-03-31 00:30 - 01:10
+
+#### 対象
+- Step: wrapper 根本原因反映の spec 更新
+- AC/EC: AC-002, AC-004, AC-005, AC-006 / EC-001, EC-005, EC-006, EC-007
+
+#### 実施内容
+- wrapper 経路の調査結果を反映し、`requirement.md` に wrapper 回帰、`create_window()` の fail-closed 契約、cleanup warning と residual retry の受け入れ条件を追加した。
+- `design.md` には `IF-006` / `IF-007` / `IF-008`、0 セッション時の 1 pane 収束、swap failure と cleanup warning の分離、log contract、residual window retry を明文化した。
+- `plan.md` は既存の完了済み S01-S03 を維持したまま、追加作業として S04 を定義し、`create_window` 修正、swap failure、cleanup retry、CLI exit 0 / log 契約まで含む TDD イテレーションへ分解した。
+- spec review を requirement/design → plan の順で実施し、fail を複数回是正したのち、最終的に requirement/design は `pass`、plan も `pass` を確認した。
+
+#### 実行コマンド / 結果
+```bash
+# spec review cycles
+spec_reviewer (requirement/design)
+# fail -> zero-session branch, staging identifier contract, failure observability, swap cleanup semantics を是正
+
+spec_reviewer (requirement/design re-review)
+# fail -> cleanup-warning contract を LayoutApplyResult / test strategy に反映
+
+spec_reviewer (requirement/design re-review)
+# pass (non-blocking: residual retry を acceptance/test へ閉じるとさらに良い)
+
+spec_reviewer (plan)
+# fail -> swap failure の専用 Red/Green と CLI exit 0 / log 契約の TDD 追加が必要
+
+spec_reviewer (plan re-review)
+# pass
+```
+
+#### 変更したファイル
+- `spec-lite/current/requirement.md` - wrapper same-name 条件、`create_window` fail-closed、cleanup warning / residual retry の受け入れ条件を追加
+- `spec-lite/current/design.md` - IF 契約、0 セッション分岐、swap failure / cleanup warning / residual retry / log contract を追加
+- `spec-lite/current/plan.md` - S04 を追加し、swap failure / CLI observability / residual retry を含む TDD 計画へ更新
+- `spec-lite/current/report.md` - 本レビューサイクルと判断を追記
+
+#### コミット
+- このログ記録時点では未実施
+
+#### メモ
+- requirement/design は final review で `pass`、plan も final review で `pass`。
+- 実装は未着手で、次の工程は S04 の TDD 実装開始。
 
 ---
 

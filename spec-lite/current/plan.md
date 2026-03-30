@@ -2,18 +2,18 @@
 種別: 実装計画書
 機能ID: "fix-tmux-headless-layout"
 機能名: "headless tmux でのレイアウト復旧"
-関連Issue: ["tmux split-window headless failure analysis"]
+関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis"]
 状態: "draft"
 作成者: "codex"
-最終更新: "2026-03-30"
+最終更新: "2026-03-31"
 依存: ["requirement.md", "design.md"]
 ---
 
 # fix-tmux-headless-layout headless tmux でのレイアウト復旧 — 実装計画（TDD: Red → Green → Refactor）
 
 ## この計画で満たす要件ID (必須)
-- 対象AC: AC-001, AC-002, AC-003, AC-004
-- 対象EC: EC-001, EC-002, EC-003, EC-004
+- 対象AC: AC-001, AC-002, AC-003, AC-004, AC-005, AC-006
+- 対象EC: EC-001, EC-002, EC-003, EC-004, EC-005, EC-006, EC-007
 - 対象制約（該当があれば）:
   - 依存追加なし
   - CLI 互換維持
@@ -24,11 +24,12 @@
   - [x] S01: `-l` ベースの分割 API と分割長算出を追加し、headless で split が通る土台を作る
   - [x] S02: orchestrator を非破壊 apply と pane 数検証に対応させ、失敗を可視化する
   - [x] S03: integrity 判定順序と E2E/回帰テストを整え、headless 復旧を保証する
+  - [ ] S04: wrapper 経路の `create_window` 根本原因を除去し、same-name 条件の回帰テストで固定する
 - historical / superseded steps（任意）:
   - [x] 旧 `planning/current/task.md` による `-p` ベース前提の実装計画（`@spec-lite/completed/20260330_1843_planning-migration/task.md` にアーカイブ済み）
 
 ## 現行の実行対象スコープ (任意)
-- 該当なし
+- S04: `create_window()` の target 契約修正、phantom target 防止、wrapper same-name regression の自動検証
 
 ## ネスト運用ルール (必須)
 - トップレベルステップ `Sxx` は「観測可能な成果」で分ける
@@ -42,11 +43,16 @@
   - AC-002 → S02
   - AC-003 → S02, S03
   - AC-004 → S02
+  - AC-005 → S04
+  - AC-006 → S04
   - EC-001 → S02
   - EC-002 → S02, S03
   - EC-003 → S02
   - EC-004 → S01, S03
-  - 非交渉制約 → S01, S02, S03
+  - EC-005 → S04
+  - EC-006 → S04
+  - EC-007 → S04
+  - 非交渉制約 → S01, S02, S03, S04
 
 ## レビュー / QA ゲート方針 (必須)
 - G1:
@@ -253,26 +259,86 @@
 - [x] `update_plan` を更新し、このステップの作業ブロックを完了にした
 - [x] コミット境界を確定した（コミットしない場合は理由を記録した）
 
+### S04 — wrapper 経路の create_window 根本原因を除去し、same-name 条件を固定する (必須)
+- 対象: AC-005 / AC-006 / EC-005 / EC-006 / EC-007 / 制約: CLI 互換維持, wrapper visible window 名維持
+- 設計参照:
+  - 対象IF/API: IF-006
+- 対象テスト:
+    - `tests/test_tmuxio.py`
+    - `tests/test_orchestrator.py`
+    - `tests/test_e2e_tmux.py`
+    - CLI entrypoint failure test
+- このステップで「追加しないこと（スコープ固定）」:
+  - wrapper の visible window 名変更
+  - 新規 CLI オプション追加
+  - renderer / tile 表示仕様変更
+
+#### update_plan（着手時に登録） (必須)
+- [ ] `update_plan` に、このステップの作業ブロックを登録した
+- 登録する作業ブロック:
+  - S04-B1: `create_window()` 契約の Red/Green
+  - S04-B2: wrapper same-name regression の Red/Green
+  - S04-B3: 品質ゲート / 報告 / コミット
+
+#### 期待する振る舞い（テストケース） (必須)
+- Given: wrapper と同じ `dashboard` session / visible window `dashboard` 条件、または `new-window` が失敗する driver 条件
+- When: staging window を作成し、wrapper または direct runner を 1 サイクル実行する
+- Then: `create_window()` は `_pick_staging_window_index()` が選んだ未使用 index に対して `session:window_index` target で window を実在作成するか、失敗時は driver 例外 / `run_once()` 明示ログ / CLI exit 0 として観測できる。wrapper 経路でも `dashboard:0` に期待 pane が作成される
+- 観測点（UI/HTTP/DB/Log など）: `tmux list-windows`, `tmux list-panes`, driver 例外, `run_once()` / CLI ログ, wrapper runner ログ
+- 追加/更新するテスト:
+  - `tests/test_tmuxio.py`
+  - `tests/test_orchestrator.py`
+  - `tests/test_e2e_tmux.py`
+  - CLI entrypoint failure test
+
+#### 作業ブロック（必須）
+- S04-B1: `create_window()` 契約修正
+  - S04-B1-I1:
+    - Red: CLI / libtmux の `create_window()` が `-t session_name` を使い、same-name 条件で失敗または phantom target を返すテストを追加する
+    - Green: `create_window()` は呼び出し元から渡された `window_index` をそのまま `session:window_index` target として使い、libtmux は `returncode` / `stderr` / 実在確認で fail-closed にする
+    - Refactor: created target 解決と実在確認を helper 化し、CLI / libtmux で契約を揃える
+- S04-B2: wrapper / orchestrator 経路固定
+  - S04-B2-I1:
+    - Red: wrapper と同じ same-name 条件で `dashboard:0` が 1 pane のまま残る integration test を追加する
+    - Green: wrapper 経路でも staging window 作成と non-destructive apply が通るよう実装を調整する
+    - Refactor: エラーログを `pane shortage` ではなく create/swap failure が分かる形へ整理する
+  - S04-B2-I2:
+    - Red: staging window 作成失敗時に orchestrator が phantom target を前提に進んでしまうテストを追加する
+    - Green: orchestrator が create failure を explicit に扱い、既存 dashboard と runner window を保持するようにする
+    - Refactor: create failure path のログ / cleanup を簡潔に整理する
+  - S04-B2-I3:
+    - Red: `swap-window` 失敗時に `dashboard:0` が変化する、または error ログが不足するテストを追加する
+    - Green: orchestrator が swap failure を explicit に扱い、既存 dashboard と runner window を保持するようにする
+    - Refactor: swap failure path の invariant 確認を明確にする
+  - S04-B2-I4:
+    - Red: cleanup warning で残置した旧 window が次サイクルで再cleanupされない、または再失敗で新規 staging を妨げるテストを追加する
+    - Green: residual window の best-effort cleanup retry を実装し、成功でも失敗でも新規レイアウト進行を妨げないようにする
+    - Refactor: residual target の保持 / クリア条件を明確にする
+- S04-B3: CLI observability
+  - S04-B3-I1:
+    - Red: create failure または swap failure で CLI が非 0 終了する、または明示ログを残さないテストを追加する
+    - Green: `--once` / 通常ループとも exit 0 と error ログ、dashboard 不変を満たすようにする
+    - Refactor: CLI entrypoint の failure logging を helper 化する
+- S04-B4: 品質ゲート / 報告 / コミット
+  - S04-B4-I1:
+    - Red: 該当なし
+    - Green: `uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_e2e_tmux.py -q` と `uv run pytest -q` を実行し、成功を確認する
+    - Refactor: `spec-lite/current/report.md` を更新し、review スコープでコミット境界を確定する
+
+#### ステップ末尾（省略しない） (必須)
+- [ ] 期待するテストと必要な品質ゲートを実施し、成功した
+- [ ] 必要なレビュー / QA ゲートを通過した、または不要理由を記録した
+- [ ] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
+- [ ] `update_plan` を更新し、このステップの作業ブロックを完了にした
+- [ ] コミット境界を確定した（コミットしない場合は理由を記録した）
+
 ## 未確定事項（TBD） (必須)
-- Q-001:
-  - 質問: staging window の一時名称を固定 prefix にするか、ランダム suffix を付与するか
-  - 選択肢:
-    - A: 固定 prefix のみで十分とする
-    - B: 固定 prefix + ランダム suffix で衝突回避する
-  - 推奨案（暫定）: B
-  - 影響範囲: S02 / `design.md` / `tests/test_orchestrator.py`, `tests/test_e2e_tmux.py`
-- Q-002:
-  - 質問: headless E2E で残る `xfail` をどこまで通常テストへ昇格するか
-  - 選択肢:
-    - A: 今回の修正に直接関係するケースだけ昇格
-    - B: headless 系 `xfail` を可能な限り全部見直す
-  - 推奨案（暫定）: A
-  - 影響範囲: S03 / `tests/test_e2e_tmux.py`
+- 該当なし
 
 ## 完了条件（Definition of Done） (必須)
 - 対象AC/ECがすべて満たされ、テストまたは文書化された検証で保証されている
 - `uv run pytest -q` がグリーンである
-- headless 回帰を再現するテストが追加され、今回の障害モードを自動検証できる
+- headless 回帰と wrapper same-name 回帰を再現するテストが追加され、今回の障害モードを自動検証できる
 - 必要なレビュー / QA ゲートを通過している
 - MUST NOT / OUT OF SCOPE を破っていない
 - `report.md` と plan の進捗が一致している
