@@ -26,6 +26,37 @@ def _run_subprocess(args, capture_output=True, check=True):
     return subprocess.run(args, capture_output=capture_output, check=check)
 
 
+def _stdout_lines(result) -> list[str]:
+    """cmd/subprocess 結果の stdout を文字列行配列へ正規化する。"""
+    stdout = getattr(result, "stdout", b"")
+    if isinstance(stdout, bytes):
+        return [line for line in stdout.decode().splitlines()]
+    if isinstance(stdout, str):
+        return [line for line in stdout.splitlines()]
+    return [str(line) for line in (stdout or [])]
+
+
+def _stderr_text(result) -> str:
+    """cmd/subprocess 結果の stderr を文字列へ正規化する。"""
+    stderr = getattr(result, "stderr", b"")
+    if isinstance(stderr, bytes):
+        return stderr.decode().strip()
+    if isinstance(stderr, str):
+        return stderr.strip()
+    return "\n".join(str(line).strip() for line in (stderr or []) if str(line).strip()).strip()
+
+
+def _raise_if_cmd_failed(result, *, action: str, target: str) -> None:
+    """returncode / stderr に基づき fail-closed で例外化する。"""
+    returncode = getattr(result, "returncode", 0)
+    stderr_text = _stderr_text(result)
+    if returncode not in (0, None):
+        message = stderr_text or f"{action} failed for {target}"
+        raise RuntimeError(message)
+    if stderr_text:
+        raise RuntimeError(stderr_text)
+
+
 class CliDriver:
     """tmux コマンドを直接実行するドライバ。依存が少なく移植性が高い。"""
 
@@ -322,13 +353,16 @@ class CliDriver:
             "-F",
             "#{session_name}:#{window_index}",
             "-t",
-            session_name,
+            requested_target,
         ]
         if detached:
             args.insert(2, "-d")
         cp = _run_subprocess(args)
-        created = cp.stdout.decode().strip()
+        created = "\n".join(_stdout_lines(cp)).strip()
         created_target = created or requested_target
+        verify = _run_subprocess(["tmux", "list-panes", "-t", created_target, "-F", "#{pane_id}"])
+        if not [line for line in _stdout_lines(verify) if str(line).strip()]:
+            raise RuntimeError(f"create-window created no panes for {created_target}")
         if width is not None or height is not None:
             resize_args = ["tmux", "resize-window", "-t", created_target]
             if width is not None:
@@ -723,23 +757,21 @@ class LibtmuxDriver:
         """指定セッションに window を作成し target を返す。"""
         server = self._ensure_server()
         requested_target = f"{session_name}:{window_index}"
-        before_indexes = {idx for idx, _ in self.list_windows_with_active(session_name)}
-        args = ["new-window", "-P", "-F", "#{session_name}:#{window_index}", "-t", session_name]
+        args = ["new-window", "-P", "-F", "#{session_name}:#{window_index}", "-t", requested_target]
         if detached:
             args.insert(1, "-d")
         res = server.cmd(*args)  # type: ignore[attr-defined]
+        _raise_if_cmd_failed(res, action="create-window", target=requested_target)
         created = ""
-        for line in getattr(res, "stdout", []) or []:
+        for line in _stdout_lines(res):
             text = str(line).strip()
             if text:
                 created = text
                 break
-        if not created:
-            after_indexes = {idx for idx, _ in self.list_windows_with_active(session_name)}
-            new_indexes = sorted(after_indexes - before_indexes)
-            if new_indexes:
-                created = f"{session_name}:{new_indexes[0]}"
         created_target = created or requested_target
+        verify = server.cmd("list-panes", "-t", created_target, "-F", "#{pane_id}")  # type: ignore[attr-defined]
+        if not [line for line in _stdout_lines(verify) if str(line).strip()]:
+            raise RuntimeError(f"create-window created no panes for {created_target}")
         if width is not None or height is not None:
             resize_args = ["resize-window", "-t", created_target]
             if width is not None:

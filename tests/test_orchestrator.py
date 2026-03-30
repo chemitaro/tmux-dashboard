@@ -31,6 +31,9 @@ class FakeIO:
         self.fail_title_for_targets = set()
         self.flip_title_once_for_targets = set()
         self.fail_kill_window_targets = set()
+        self.fail_create_window_targets = set()
+        self.partial_create_window_targets = set()
+        self.fail_swap_window_pairs = set()
         self.overwrite_title_on_respawn = False
 
         self._details_by_window = {}
@@ -174,13 +177,19 @@ class FakeIO:
     ):
         target = f"{session_name}:{window_index}"
         self.create_window_calls.append((session_name, window_index, detached, width, height))
+        if target in self.fail_create_window_targets:
+            raise RuntimeError("forced create-window failure")
         if target in self._details_by_window:
             raise RuntimeError("window already exists")
         self._init_window(target, [self._new_pane_id()])
+        if target in self.partial_create_window_targets:
+            raise RuntimeError("forced create-window post-create failure")
         return target
 
     def swap_window(self, source_target: str, destination_target: str):
         self.swap_window_calls.append((source_target, destination_target))
+        if (source_target, destination_target) in self.fail_swap_window_pairs:
+            raise RuntimeError("forced swap-window failure")
         src = self._details_by_window[source_target]
         dst = self._details_by_window[destination_target]
         self._details_by_window[source_target], self._details_by_window[destination_target] = dst, src
@@ -295,6 +304,62 @@ def test_run_once_preserves_dashboard_on_staging_failure():
     assert io.list_panes("dashboard:0") == original
 
 
+def test_run_once_logs_explicit_error_when_create_window_fails():
+    """目的: staging window 作成失敗を explicit な error ログで観測し、dashboard を保持することを確認する。
+    前提: create_window が例外を送出する。
+    期待: swap は実行されず、dashboard:0 は不変で create-window failed を含む error ログが残る。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+    import logging
+
+    io = FakeIO(sessions=["dashboard", "a", "b"], width=120, height=40, panes=["%1", "%2"])
+    io.fail_create_window_targets.add("dashboard:99")
+    original = io.list_panes("dashboard:0")
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+
+    fake_logger = Mock()
+    fake_logger.info.return_value = None
+    fake_logger.error.return_value = None
+    fake_logger.warning.return_value = None
+
+    original_get_logger = logging.getLogger
+    logging.getLogger = lambda _name: fake_logger  # type: ignore[assignment]
+    try:
+        _ = o.run_once(window_target="dashboard:0")
+    finally:
+        logging.getLogger = original_get_logger  # type: ignore[assignment]
+
+    assert io.swap_window_calls == []
+    assert io.kill_window_calls == ["dashboard:99"]
+    assert io.list_panes("dashboard:0") == original
+    errors = [call.args[0] % call.args[1:] for call in fake_logger.error.call_args_list]
+    assert any("create-window failed" in message for message in errors)
+
+
+def test_run_once_cleans_predicted_staging_target_when_create_window_fails_after_partial_create():
+    """目的: create_window の post-create failure 時でも予測 staging target を cleanup することを確認する。
+    前提: create_window が window を作成した後に例外を送出する。
+    期待: predicted staging target に対して kill_window が呼ばれ、半端な staging window が残らない。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(sessions=["dashboard", "a", "b"], width=120, height=40, panes=["%1", "%2"])
+    io.partial_create_window_targets.add("dashboard:99")
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+    _ = o.run_once(window_target="dashboard:0")
+
+    assert io.swap_window_calls == []
+    assert io.kill_window_calls == ["dashboard:99"]
+    assert "dashboard:99" not in io._details_by_window
+    assert o._residual_window_target is None
+
+
 def test_run_once_logs_warning_when_staging_cleanup_fails():
     """目的: staging cleanup が失敗した場合に warning ログを残すことを確認する。
     前提: staging で分割失敗し、続く kill_window も失敗する。
@@ -323,8 +388,138 @@ def test_run_once_logs_warning_when_staging_cleanup_fails():
     finally:
         logging.getLogger = original_get_logger  # type: ignore[assignment]
 
-    warnings = [str(call.args[0]) for call in fake_logger.warning.call_args_list]
+    warnings = [call.args[0] % call.args[1:] for call in fake_logger.warning.call_args_list]
     assert any("failed to cleanup staging window" in message for message in warnings)
+
+
+def test_run_once_logs_explicit_error_and_cleans_staging_when_swap_fails():
+    """目的: swap-window 失敗を explicit な error ログで観測し、dashboard を保持することを確認する。
+    前提: staging 構築は成功するが swap_window が例外を送出する。
+    期待: dashboard:0 は不変で、staging は cleanup され、swap-window failed を含む error ログが残る。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+    import logging
+
+    io = FakeIO(sessions=["dashboard", "a", "b"], width=120, height=40, panes=["%1", "%2"])
+    io.fail_swap_window_pairs.add(("dashboard:99", "dashboard:0"))
+    original = io.list_panes("dashboard:0")
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+
+    fake_logger = Mock()
+    fake_logger.info.return_value = None
+    fake_logger.error.return_value = None
+    fake_logger.warning.return_value = None
+
+    original_get_logger = logging.getLogger
+    logging.getLogger = lambda _name: fake_logger  # type: ignore[assignment]
+    try:
+        _ = o.run_once(window_target="dashboard:0")
+    finally:
+        logging.getLogger = original_get_logger  # type: ignore[assignment]
+
+    assert io.swap_window_calls == [("dashboard:99", "dashboard:0")]
+    assert io.kill_window_calls == ["dashboard:99"]
+    assert io.list_panes("dashboard:0") == original
+    errors = [call.args[0] % call.args[1:] for call in fake_logger.error.call_args_list]
+    assert any("swap-window failed" in message for message in errors)
+
+
+def test_run_once_retries_residual_cleanup_without_blocking_new_layout():
+    """目的: swap後 cleanup 失敗の残置 window を次サイクルで再cleanupしつつ、新規 apply を妨げないことを確認する。
+    前提: 1回目は swap 後の kill_window が失敗し、2回目は residual cleanup が成功する。
+    期待: residual target が再試行後に消え、後続の run_once は追加の staging 作成なしで正常終了する。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(sessions=["dashboard", "alpha", "beta"], width=120, height=40, panes=["%1", "%2"])
+    io.fail_kill_window_targets.add("dashboard:99")
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+
+    first_plan = o.run_once(window_target="dashboard:0")
+    assert o._residual_window_target == "dashboard:99"
+    assert io.kill_window_calls == ["dashboard:99"]
+
+    io.fail_kill_window_targets.remove("dashboard:99")
+    _ = o.run_once(window_target="dashboard:0")
+
+    assert first_plan["sessions"] == ["alpha", "beta"]
+    assert o._residual_window_target is None
+    assert io.kill_window_calls == ["dashboard:99", "dashboard:99"]
+    assert len(io.create_window_calls) == 1
+
+
+def test_run_once_logs_retry_cleanup_failure_and_still_relayouts():
+    """目的: residual cleanup の再失敗を warning で観測しつつ、新しい staging で再レイアウト継続することを確認する。
+    前提: 1回目で旧 window cleanup が失敗し、2回目冒頭の residual retry も再失敗する。
+    期待: retry failure を warning で記録し、次サイクルでは別 index の staging window を作って relayout を継続する。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+    import logging
+
+    io = FakeIO(sessions=["dashboard", "alpha", "beta"], width=120, height=40, panes=["%1", "%2"])
+    io.fail_kill_window_targets.add("dashboard:99")
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+
+    fake_logger = Mock()
+    fake_logger.info.return_value = None
+    fake_logger.error.return_value = None
+    fake_logger.warning.return_value = None
+
+    original_get_logger = logging.getLogger
+    logging.getLogger = lambda _name: fake_logger  # type: ignore[assignment]
+    try:
+        _ = o.run_once(window_target="dashboard:0")
+        io._sessions.append("gamma")
+        _ = o.run_once(window_target="dashboard:0")
+    finally:
+        logging.getLogger = original_get_logger  # type: ignore[assignment]
+
+    warnings = [call.args[0] % call.args[1:] for call in fake_logger.warning.call_args_list]
+    assert any("failed to retry residual window cleanup" in message for message in warnings)
+    assert [call[1] for call in io.create_window_calls] == [99, 100]
+    assert io.swap_window_calls == [("dashboard:99", "dashboard:0"), ("dashboard:100", "dashboard:0")]
+    assert io.kill_window_calls == ["dashboard:99", "dashboard:99", "dashboard:100"]
+    assert o._residual_window_target == "dashboard:99"
+    titles = {title for _, title in io.list_panes_with_titles("dashboard:0")}
+    assert titles == {"alpha", "beta", "gamma"}
+
+
+def test_run_once_keeps_older_residual_pending_while_preserving_newer_cleanup_failure():
+    """目的: 古い residual を優先再試行しつつ、新たな cleanup failure も失わないことを確認する。
+    前提: 1回目で dashboard:99 が residual 化し、2回目は 99 の retry が失敗したまま 100 も cleanup 失敗する。
+    期待: pending residual は [99, 100] の順で保持され、99 解消後も 100 が次の retry 対象として残る。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(sessions=["dashboard", "alpha", "beta"], width=120, height=40, panes=["%1", "%2"])
+    io.fail_kill_window_targets.add("dashboard:99")
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+
+    _ = o.run_once(window_target="dashboard:0")
+    io._sessions.append("gamma")
+    io.fail_kill_window_targets.add("dashboard:100")
+    _ = o.run_once(window_target="dashboard:0")
+
+    assert o._residual_window_targets == ["dashboard:99", "dashboard:100"]
+
+    io.fail_kill_window_targets.remove("dashboard:99")
+    _ = o.run_once(window_target="dashboard:0")
+
+    assert o._residual_window_targets == ["dashboard:100"]
+    assert o._residual_window_target == "dashboard:100"
+    assert io.kill_window_calls == ["dashboard:99", "dashboard:99", "dashboard:100", "dashboard:99"]
 
 
 def test_run_once_detects_pane_shortage_without_silent_zip():

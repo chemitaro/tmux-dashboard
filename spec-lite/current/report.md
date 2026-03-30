@@ -389,6 +389,124 @@ spec_reviewer (plan re-review)
 
 ---
 
+### 2026-03-31 08:20 - 08:28
+
+#### 対象
+- Step: S04
+- AC/EC: AC-005, AC-006 / EC-005, EC-006, EC-007
+
+#### 実施内容
+- `tmuxio.py` の CLI / libtmux 両経路で `create_window()` が `session_name:window_index` を `new-window -t` にそのまま渡すよう修正した。
+- `create_window()` に作成後 `list-panes` による実在確認を追加し、CLI/libtmux とも phantom target を返さず fail-closed で例外化するようにした。
+- libtmux 側は `returncode` / `stderr` 異常も検出して例外化するよう修正し、size 指定時の `resize-window` 挙動は維持した。
+- `orchestrator.py` は create failure / layout apply failure / swap failure を分離して `ERROR` ログ化し、swap 後 cleanup failure は `WARNING` と residual window retry へ分離した。
+- residual window target を次サイクル冒頭で best-effort cleanup retry する状態管理を追加し、retry 成否にかかわらず新規 staging 試行を継続できるようにした。
+- `tests/test_tmuxio.py`, `tests/test_orchestrator.py`, `tests/test_cli_entry.py`, `tests/test_e2e_tmux.py` を TDD で更新し、same-name 条件・fail-closed・create/swap failure observability・residual cleanup retry・CLI exit 0 を固定した。
+
+#### 実行コマンド / 結果
+```bash
+uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_cli_entry.py -q
+# 33 passed in 0.10s
+
+uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_e2e_tmux.py tests/test_cli_entry.py -q
+# 40 passed in 1.91s
+
+uv run pytest -q
+# 94 passed in 1.79s
+```
+
+#### 変更したファイル
+- `tmux_dashboard/tmuxio.py` - `create_window()` の exact target / fail-closed / 実在確認を実装
+- `tmux_dashboard/orchestrator.py` - create/swap failure の明示ログ、cleanup warning、residual cleanup retry を実装
+- `tests/test_tmuxio.py` - CLI / libtmux の create_window exact target / fail-closed テストを追加
+- `tests/test_orchestrator.py` - create failure / swap failure / residual cleanup retry の回帰テストを追加
+- `tests/test_cli_entry.py` - create/swap failure 時の exit 0 / logging テストを追加
+- `tests/test_e2e_tmux.py` - session/window same-name 条件の E2E 回帰を追加
+- `spec-lite/current/plan.md` - S04 完了状態へ更新
+- `spec-lite/current/report.md` - S04 実装ログを追記
+
+#### コミット
+- 未実施（ユーザーレビュー待ち）
+
+#### メモ
+- wrapper の visible window 名 `dashboard` は変更していない。
+- CLI / 通常ループとも個別サイクル failure で exit 0 を維持する方針は現行のまま、明示ログを強化した。
+
+---
+
+### 2026-03-31 08:30 - 08:38
+
+#### 対象
+- Step: S04 follow-up review findings
+- AC/EC: AC-005, AC-006 / EC-005, EC-006, EC-007
+
+#### 実施内容
+- `tests/test_orchestrator.py` に residual cleanup retry の再失敗 branch を追加し、warning を出しつつ別 index の staging window で再レイアウト継続することを固定した。
+- `tmux_dashboard/orchestrator.py` は residual retry が失敗したまま後続 staging cleanup が成功しても、未解消の residual target を消さないよう補正した。
+- `tests/test_cli_entry.py` に `run_once()` が内部で explicit failure をログして正常 return する経路の coverage を追加し、CLI exit 0 と failure detail の観測可能性を確認した。
+- `tests/test_e2e_tmux.py` に actual wrapper path (`./tmux-dashboard`) を起動する回帰テストを追加し、visible dashboard window と runner window が作成され、`dashboard:0` に複数 pane / titles が得られることを検証した。
+- `spec-lite/current/plan.md` は S04 スコープ説明を actual wrapper path / residual retry failure branch まで含む表現へ更新した。
+
+#### 実行コマンド / 結果
+```bash
+uv run pytest tests/test_orchestrator.py tests/test_cli_entry.py tests/test_e2e_tmux.py -q
+# 29 passed in 1.83s
+
+uv run pytest -q
+# 97 passed in 2.11s
+```
+
+#### 変更したファイル
+- `tmux_dashboard/orchestrator.py` - residual retry failure 後も既存 residual target を保持するよう補正
+- `tests/test_orchestrator.py` - residual cleanup retry failure branch の回帰テストを追加
+- `tests/test_cli_entry.py` - run_once がログして正常 return する CLI observability テストを追加
+- `tests/test_e2e_tmux.py` - actual wrapper path regression test を追加
+- `spec-lite/current/plan.md` - S04 follow-up coverage を反映
+- `spec-lite/current/report.md` - follow-up review findings 対応ログを追記
+
+#### コミット
+- 未実施（ユーザーレビュー待ち）
+
+#### メモ
+- actual wrapper path test は detached control session 内から `./tmux-dashboard` を起動する方式で実装した。
+- wrapper 最終段の `switch-client` 成否には依存せず、runner window 起動後の dashboard state を観測する。
+
+---
+
+### 2026-03-31 08:40 - 08:46
+
+#### 対象
+- Step: S04 follow-up review findings (追加)
+- AC/EC: AC-006 / EC-006, EC-007
+
+#### 実施内容
+- `orchestrator.py` の residual 管理を単一 target から FIFO 的な pending list へ拡張し、古い residual を優先して retry しつつ、新しい cleanup failure も失わないよう補正した。
+- create-window failure が post-create verification / resize failure のような部分失敗でも、予測済み `staging_target` を best-effort cleanup するよう `run_once()` を補強した。
+- `tests/test_orchestrator.py` に partial create failure cleanup テストと、古い residual を保持したまま新しい residual も後続 retry 対象として保持するテストを追加した。
+
+#### 実行コマンド / 結果
+```bash
+uv run pytest tests/test_orchestrator.py tests/test_cli_entry.py tests/test_e2e_tmux.py -q
+# 31 passed in 1.85s
+
+uv run pytest -q
+# 99 passed in 2.02s
+```
+
+#### 変更したファイル
+- `tmux_dashboard/orchestrator.py` - partial-create cleanup と複数 residual pending 管理を補強
+- `tests/test_orchestrator.py` - partial create failure / multi-residual preservation の回帰テストを追加
+- `spec-lite/current/plan.md` - S04 スコープ表現を補足
+- `spec-lite/current/report.md` - 追加 findings 対応ログを追記
+
+#### コミット
+- 未実施（ユーザーレビュー待ち）
+
+#### メモ
+- 後方互換のため、`_residual_window_target` は最古 pending residual を返す property として維持した。
+
+---
+
 ## 遭遇した問題と解決 (任意)
 - 問題: headless tmux で `split-window -p` が `size missing` で失敗し、dashboard が 1 pane のまま復旧しない
   - 解決: `-l` ベースの split へ移行し、staging window による non-destructive apply と E2E 回帰テストまで通して復旧した

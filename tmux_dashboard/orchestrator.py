@@ -27,6 +27,8 @@ class LayoutApplyResult:
     success: bool
     pane_ids: List[str]
     error_message: str | None = None
+    warning_message: str | None = None
+    residual_window_target: str | None = None
 
 
 @dataclass
@@ -37,6 +39,12 @@ class Orchestrator:
     cfg: config.Config
     _last_signature: Tuple[int, int, Tuple[str, ...]] | None = field(default=None, init=False, repr=False)
     _last_mapping: List[Tuple[str, str, str]] = field(default_factory=list, init=False, repr=False)  # (tile_pane_id, target_pane_id, session)
+    _residual_window_targets: List[str] = field(default_factory=list, init=False, repr=False)
+
+    @property
+    def _residual_window_target(self) -> str | None:
+        """後方互換のため最古の residual target を返す。"""
+        return self._residual_window_targets[0] if self._residual_window_targets else None
 
     def scan_sessions(self) -> List[str]:
         """セッション一覧を取得し、除外/ASCII昇順で返す。"""
@@ -150,6 +158,75 @@ class Orchestrator:
         panes_sorted = self._sorted_panes(window_target)
         self.validate_mapping(panes_sorted, sessions, exact=True)
 
+    def _log_apply_error(
+        self,
+        logger,
+        *,
+        failure_kind: str,
+        window_target: str,
+        staging_target: str | None,
+        error: Exception | str,
+    ) -> None:
+        """レイアウト失敗を観測しやすい形式で記録する。"""
+        logger.error(
+            "%s: window_target=%s staging_target=%s error=%s",
+            failure_kind,
+            window_target,
+            staging_target,
+            error,
+        )
+
+    def _cleanup_window_best_effort(
+        self,
+        logger,
+        *,
+        window_target: str,
+        cleanup_target: str,
+        warning_prefix: str,
+    ) -> bool:
+        """window cleanup を best-effort で試行し、成功可否を返す。"""
+        try:
+            self.io.kill_window(cleanup_target)
+            return True
+        except Exception as cleanup_error:
+            logger.warning(
+                "%s: window_target=%s residual_window_target=%s error=%s",
+                warning_prefix,
+                window_target,
+                cleanup_target,
+                cleanup_error,
+            )
+            return False
+
+    def _remember_residual_window(self, window_target: str) -> None:
+        """retry 対象の residual window を重複なく記録する。"""
+        if window_target not in self._residual_window_targets:
+            self._residual_window_targets.append(window_target)
+
+    def _forget_residual_window(self, window_target: str) -> None:
+        """retry 完了した residual window を記録から外す。"""
+        self._residual_window_targets = [
+            target for target in self._residual_window_targets if target != window_target
+        ]
+
+    def _retry_residual_cleanup(self, logger, *, window_target: str) -> None:
+        """前回残置した window の cleanup を次サイクル冒頭で再試行する。"""
+        if not self._residual_window_targets:
+            return
+        residual_target = self._residual_window_targets[0]
+        if self._cleanup_window_best_effort(
+            logger,
+            window_target=window_target,
+            cleanup_target=residual_target,
+            warning_prefix="failed to retry residual window cleanup",
+        ):
+            self._forget_residual_window(residual_target)
+            logger.info(
+                "retried residual window cleanup: window_target=%s residual_window_target=%s",
+                window_target,
+                residual_target,
+            )
+
     def apply_titles(self, window_target: str, sessions: List[str]) -> None:
         """pane border を有効化し、pane_title にセッション名を割り当てる。"""
         # ボーダーを上部にし、タイトルは pane_title を表示
@@ -211,6 +288,7 @@ class Orchestrator:
         """
         logger = logging.getLogger("tmux_dashboard.orchestrator")
         sessions = self.scan_sessions()
+        self._retry_residual_cleanup(logger, window_target=window_target)
         
         # dashboardセッションの存在確認とwindow_size取得を試行
         try:
@@ -264,9 +342,9 @@ class Orchestrator:
             need_layout = self.check_pane_integrity(window_target)
 
         if need_layout:
-            staging_target: str | None = None
+            staging_index = self._pick_staging_window_index("dashboard")
+            staging_target = f"dashboard:{staging_index}"
             try:
-                staging_index = self._pick_staging_window_index("dashboard")
                 staging_target = self.io.create_window(
                     "dashboard",
                     staging_index,
@@ -274,7 +352,24 @@ class Orchestrator:
                     width=W,
                     height=H,
                 )
+            except Exception as create_error:
+                self._log_apply_error(
+                    logger,
+                    failure_kind="create-window failed",
+                    window_target=window_target,
+                    staging_target=staging_target,
+                    error=create_error,
+                )
+                if not self._cleanup_window_best_effort(
+                    logger,
+                    window_target=window_target,
+                    cleanup_target=staging_target,
+                    warning_prefix="failed to cleanup staging window",
+                ):
+                    self._remember_residual_window(staging_target)
+                return plan
 
+            try:
                 result = self.apply_layout(
                     staging_target,
                     plan["columns"],
@@ -286,23 +381,50 @@ class Orchestrator:
 
                 self.apply_titles(staging_target, sessions)
                 self.validate_staging_structure(staging_target, sessions)
-
-                self.io.swap_window(staging_target, window_target)
-                # swap 後、staging target 側に旧 dashboard:0 が来る
-                self.io.kill_window(staging_target)
-                self._last_signature = signature
-            except Exception as e:
-                logger.error("non-destructive apply failed: %s", e)
-                if staging_target is not None:
-                    try:
-                        self.io.kill_window(staging_target)
-                    except Exception as cleanup_error:
-                        logger.warning(
-                            "failed to cleanup staging window %s: %s",
-                            staging_target,
-                            cleanup_error,
-                        )
+            except Exception as layout_error:
+                self._log_apply_error(
+                    logger,
+                    failure_kind="layout apply failed",
+                    window_target=window_target,
+                    staging_target=staging_target,
+                    error=layout_error,
+                )
+                self._cleanup_window_best_effort(
+                    logger,
+                    window_target=window_target,
+                    cleanup_target=staging_target,
+                    warning_prefix="failed to cleanup staging window",
+                ) or self._remember_residual_window(staging_target)
                 return plan
+
+            try:
+                self.io.swap_window(staging_target, window_target)
+            except Exception as swap_error:
+                self._log_apply_error(
+                    logger,
+                    failure_kind="swap-window failed",
+                    window_target=window_target,
+                    staging_target=staging_target,
+                    error=swap_error,
+                )
+                self._cleanup_window_best_effort(
+                    logger,
+                    window_target=window_target,
+                    cleanup_target=staging_target,
+                    warning_prefix="failed to cleanup staging window",
+                ) or self._remember_residual_window(staging_target)
+                return plan
+
+            self._last_signature = signature
+            if self._cleanup_window_best_effort(
+                logger,
+                window_target=window_target,
+                cleanup_target=staging_target,
+                warning_prefix="failed to cleanup staging window",
+            ):
+                self._forget_residual_window(staging_target)
+            else:
+                self._remember_residual_window(staging_target)
 
         # タイルpane（列優先）とセッションのマッピングを作成
         tiles_sorted = self._sorted_panes(window_target)

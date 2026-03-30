@@ -140,3 +140,244 @@ def test_cli_handles_keyboard_interrupt(monkeypatch):
     rc = cli.main(["--once", "--iterations", "5"])  # 1回目でKeyboardInterrupt
     assert rc == 0
 
+
+def test_cli_once_keeps_exit_zero_and_logs_create_window_failure(monkeypatch):
+    """目的: --once 実行中の create-window failure でも exit 0 と error ログを維持することを確認する。"""
+    import logging
+    from tmux_dashboard import __main__ as cli
+
+    class FakeCfg:
+        poll_interval_sec = 0
+
+        class logging:
+            dir = "~/.local/state/tmux-dashboard"
+            level = "INFO"
+            rotate_max_bytes = 10485760
+            rotate_backup_count = 5
+
+    class FakeIO:
+        def list_sessions(self):
+            return []
+
+        def create_session(self, name, detached=True):
+            pass
+
+    class FakeOrch:
+        def __init__(self, io, cfg):
+            pass
+
+        def run_once(self, window_target="dashboard:0"):
+            raise RuntimeError("create-window failed: window_target=dashboard:0 staging_target=dashboard:99")
+
+    monkeypatch.setattr(cli, "config", type("M", (), {"load_config": staticmethod(lambda p: FakeCfg())}))
+    monkeypatch.setattr(cli, "tmuxio", type("M", (), {"create_from_config": staticmethod(lambda _cfg: FakeIO())}))
+    monkeypatch.setattr(cli, "orchestrator", type("M", (), {"Orchestrator": FakeOrch}))
+    monkeypatch.setattr(cli, "logging_setup", type("M", (), {"setup_logging": staticmethod(lambda _cfg: None)}))
+    monkeypatch.setattr(cli, "session_manager", type("M", (), {"ensure_dashboard_session": staticmethod(lambda _io: False)}))
+
+    messages = []
+    original_get_logger = logging.getLogger
+    fake_logger = type(
+        "L",
+        (),
+        {"error": lambda self, fmt, *args: messages.append(fmt % args)},
+    )()
+    monkeypatch.setattr(
+        logging,
+        "getLogger",
+        lambda name=None: fake_logger if name == "tmux_dashboard.main" else original_get_logger(name),
+    )
+
+    rc = cli.main(["--once"])
+    assert rc == 0
+    assert any("create-window failed" in message for message in messages)
+
+
+def test_cli_loop_keeps_exit_zero_and_logs_swap_window_failure(monkeypatch):
+    """目的: 通常ループ中の swap-window failure でも exit 0 と error ログを維持することを確認する。"""
+    import logging
+    from tmux_dashboard import __main__ as cli
+
+    class FakeCfg:
+        poll_interval_sec = 0
+
+        class logging:
+            dir = "~/.local/state/tmux-dashboard"
+            level = "INFO"
+            rotate_max_bytes = 10485760
+            rotate_backup_count = 5
+
+    class FakeIO:
+        def list_sessions(self):
+            return []
+
+        def create_session(self, name, detached=True):
+            pass
+
+    class FakeOrch:
+        def __init__(self, io, cfg):
+            self.calls = 0
+
+        def run_once(self, window_target="dashboard:0"):
+            raise RuntimeError("swap-window failed: window_target=dashboard:0 staging_target=dashboard:99")
+
+    ensure_calls = {"count": 0}
+
+    def fake_ensure(_io):
+        ensure_calls["count"] += 1
+        if ensure_calls["count"] >= 3:
+            raise KeyboardInterrupt
+        return False
+
+    monkeypatch.setattr(cli, "config", type("M", (), {"load_config": staticmethod(lambda p: FakeCfg())}))
+    monkeypatch.setattr(cli, "tmuxio", type("M", (), {"create_from_config": staticmethod(lambda _cfg: FakeIO())}))
+    monkeypatch.setattr(cli, "orchestrator", type("M", (), {"Orchestrator": FakeOrch}))
+    monkeypatch.setattr(cli, "logging_setup", type("M", (), {"setup_logging": staticmethod(lambda _cfg: None)}))
+    monkeypatch.setattr(cli, "session_manager", type("M", (), {"ensure_dashboard_session": staticmethod(fake_ensure)}))
+
+    messages = []
+    original_get_logger = logging.getLogger
+    fake_logger = type(
+        "L",
+        (),
+        {"error": lambda self, fmt, *args: messages.append(fmt % args)},
+    )()
+    monkeypatch.setattr(
+        logging,
+        "getLogger",
+        lambda name=None: fake_logger if name == "tmux_dashboard.main" else original_get_logger(name),
+    )
+
+    rc = cli.main([])
+    assert rc == 0
+    assert any("swap-window failed" in message for message in messages)
+
+
+def test_cli_once_keeps_exit_zero_when_run_once_logs_failure_and_returns(monkeypatch):
+    """目的: run_once が内部で失敗ログを出して正常 return しても CLI が exit 0 を維持し、失敗詳細が観測できることを確認する。"""
+    import logging
+    from tmux_dashboard import __main__ as cli
+
+    class FakeCfg:
+        poll_interval_sec = 0
+
+        class logging:
+            dir = "~/.local/state/tmux-dashboard"
+            level = "INFO"
+            rotate_max_bytes = 10485760
+            rotate_backup_count = 5
+
+    class FakeIO:
+        def list_sessions(self):
+            return []
+
+        def create_session(self, name, detached=True):
+            pass
+
+    class FakeOrch:
+        def __init__(self, io, cfg):
+            pass
+
+        def run_once(self, window_target="dashboard:0"):
+            logging.getLogger("tmux_dashboard.orchestrator").error(
+                "create-window failed: window_target=%s staging_target=%s error=%s",
+                window_target,
+                "dashboard:99",
+                "forced create-window failure",
+            )
+            return {"columns": 0, "rows": 0, "sessions": [], "positions": []}
+
+    monkeypatch.setattr(cli, "config", type("M", (), {"load_config": staticmethod(lambda p: FakeCfg())}))
+    monkeypatch.setattr(cli, "tmuxio", type("M", (), {"create_from_config": staticmethod(lambda _cfg: FakeIO())}))
+    monkeypatch.setattr(cli, "orchestrator", type("M", (), {"Orchestrator": FakeOrch}))
+    monkeypatch.setattr(cli, "logging_setup", type("M", (), {"setup_logging": staticmethod(lambda _cfg: None)}))
+    monkeypatch.setattr(cli, "session_manager", type("M", (), {"ensure_dashboard_session": staticmethod(lambda _io: False)}))
+
+    messages = []
+    original_get_logger = logging.getLogger
+    fake_logger = type(
+        "L",
+        (),
+        {
+            "error": lambda self, fmt, *args: messages.append(fmt % args),
+        },
+    )()
+    monkeypatch.setattr(
+        logging,
+        "getLogger",
+        lambda name=None: fake_logger if name == "tmux_dashboard.orchestrator" else original_get_logger(name),
+    )
+
+    rc = cli.main(["--once"])
+    assert rc == 0
+    assert any("create-window failed" in message for message in messages)
+    assert any("forced create-window failure" in message for message in messages)
+
+
+def test_cli_loop_keeps_exit_zero_when_run_once_logs_failure_and_returns(monkeypatch):
+    """目的: 通常ループで run_once が内部ログ後に正常 return しても CLI が exit 0 を維持することを確認する。"""
+    import logging
+    from tmux_dashboard import __main__ as cli
+
+    class FakeCfg:
+        poll_interval_sec = 0
+
+        class logging:
+            dir = "~/.local/state/tmux-dashboard"
+            level = "INFO"
+            rotate_max_bytes = 10485760
+            rotate_backup_count = 5
+
+    class FakeIO:
+        def list_sessions(self):
+            return []
+
+        def create_session(self, name, detached=True):
+            pass
+
+    class FakeOrch:
+        def __init__(self, io, cfg):
+            pass
+
+        def run_once(self, window_target="dashboard:0"):
+            logging.getLogger("tmux_dashboard.orchestrator").error(
+                "swap-window failed: window_target=%s staging_target=%s error=%s",
+                window_target,
+                "dashboard:99",
+                "forced swap-window failure",
+            )
+            return {"columns": 0, "rows": 0, "sessions": [], "positions": []}
+
+    ensure_calls = {"count": 0}
+
+    def fake_ensure(_io):
+        ensure_calls["count"] += 1
+        if ensure_calls["count"] >= 3:
+            raise KeyboardInterrupt
+        return False
+
+    monkeypatch.setattr(cli, "config", type("M", (), {"load_config": staticmethod(lambda p: FakeCfg())}))
+    monkeypatch.setattr(cli, "tmuxio", type("M", (), {"create_from_config": staticmethod(lambda _cfg: FakeIO())}))
+    monkeypatch.setattr(cli, "orchestrator", type("M", (), {"Orchestrator": FakeOrch}))
+    monkeypatch.setattr(cli, "logging_setup", type("M", (), {"setup_logging": staticmethod(lambda _cfg: None)}))
+    monkeypatch.setattr(cli, "session_manager", type("M", (), {"ensure_dashboard_session": staticmethod(fake_ensure)}))
+
+    messages = []
+    original_get_logger = logging.getLogger
+    fake_logger = type(
+        "L",
+        (),
+        {
+            "error": lambda self, fmt, *args: messages.append(fmt % args),
+        },
+    )()
+    monkeypatch.setattr(
+        logging,
+        "getLogger",
+        lambda name=None: fake_logger if name == "tmux_dashboard.orchestrator" else original_get_logger(name),
+    )
+
+    rc = cli.main([])
+    assert rc == 0
+    assert any("swap-window failed" in message for message in messages)
+    assert any("forced swap-window failure" in message for message in messages)

@@ -13,8 +13,11 @@
 from __future__ import annotations
 
 import shutil
+import shlex
 import subprocess
 import sys
+import time
+from pathlib import Path
 from typing import List
 
 import pytest
@@ -71,6 +74,26 @@ def _pane_widths(target: str) -> list[int]:
     return [int(x) for x in cp.stdout.decode().splitlines() if x]
 
 
+def _window_names(session_name: str) -> list[str]:
+    cp = _sh(["tmux", "list-windows", "-t", session_name, "-F", "#{window_name}"])
+    return [x for x in cp.stdout.decode().splitlines() if x]
+
+
+def _wait_until(predicate, *, timeout: float = 8.0, interval: float = 0.1):
+    deadline = time.monotonic() + timeout
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            if predicate():
+                return
+        except Exception as exc:  # pragma: no cover - 待機中の一時的不整合
+            last_error = exc
+        time.sleep(interval)
+    if last_error is not None:
+        raise AssertionError(f"condition not met before timeout: {last_error}")
+    raise AssertionError("condition not met before timeout")
+
+
 def _run_dashboard_once(target: str, iterations: int = 1, config_path: str | None = None):
     args = [
         sys.executable,
@@ -119,6 +142,41 @@ def test_e2e_remove_session_updates_titles(tmp_path):
     titles = _pane_titles("dashboard:0")
     assert "beta" not in titles
     assert any(t in {"alpha", "gamma"} for t in titles)
+
+
+def test_e2e_same_name_session_and_window_still_builds_layout(tmp_path):
+    """wrapper同等の session/window 同名条件でも staging window 作成に成功する。"""
+    _sh(["tmux", "new-session", "-d", "-s", "dashboard", "-n", "dashboard"])
+    for name in ["alpha", "beta", "gamma"]:
+        _create_session(name)
+
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text("tmux:\n  driver: libtmux\n", encoding="utf-8")
+    _run_dashboard_once("dashboard:0", config_path=str(cfg))
+
+    titles = _pane_titles("dashboard:0")
+    pane_widths = _pane_widths("dashboard:0")
+    assert len(pane_widths) == 3
+    assert set(titles) == {"alpha", "beta", "gamma"}
+
+
+def test_e2e_wrapper_path_builds_layout_and_runner_window():
+    """実際の wrapper 経路でも dashboard/runner window を作成し、複数 pane と titles を得られる。"""
+    repo_dir = Path(__file__).resolve().parents[1]
+    for name in ["alpha", "beta", "gamma"]:
+        _create_session(name)
+
+    wrapper_cmd = f"cd {shlex.quote(str(repo_dir))} && ./tmux-dashboard"
+    _sh(["tmux", "new-session", "-d", "-s", "control", wrapper_cmd])
+
+    _wait_until(
+        lambda: "__tmux_dashboard_runner__" in set(_window_names("dashboard"))
+        and set(_pane_titles("dashboard:0")) == {"alpha", "beta", "gamma"}
+        and len(_pane_widths("dashboard:0")) == 3
+    )
+
+    assert "__tmux_dashboard_runner__" in set(_window_names("dashboard"))
+    assert len(_pane_widths("dashboard:0")) == 3
 
 
 def test_e2e_resize_single_column_layout(tmp_path):
