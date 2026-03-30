@@ -10,7 +10,7 @@
 2. **コード調査**: 95%の理解を得るまで調査
 3. **要件**: 何を作るかを定義 (`@spec-lite/current/requirement.md`)
 4. **設計**: 95%の理解後にどう作るかを定義 (`@spec-lite/current/design.md`)
-5. **実装計画**: タスクチェックボックス (`@spec-lite/current/plan.md`)
+5. **実装計画**: チェックボックス付き計画 (`@spec-lite/current/plan.md`)
 
 ### 2. 実装フェーズ
 
