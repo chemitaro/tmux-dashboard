@@ -121,6 +121,34 @@ class CliDriver:
         """ウィンドウ限定（-w）でオプションを設定する（非侵襲）。"""
         _run_subprocess(["tmux", "set-option", "-w", "-t", window_target, key, value])
 
+    def get_window_option(self, window_target: str, option_name: str) -> str:
+        """ウィンドウ限定（-w）のオプション値を返す。"""
+        cp = _run_subprocess(
+            ["tmux", "show-options", "-w", "-t", window_target, option_name]
+        )
+        lines = [line.strip() for line in cp.stdout.decode().splitlines() if line.strip()]
+        if lines:
+            parts = lines[0].split(None, 1)
+            if len(parts) == 2:
+                key, value = parts
+                if key != option_name:
+                    raise RuntimeError(
+                        f"show-options returned unexpected key: expected={option_name} actual={key}"
+                    )
+                return value
+            raise RuntimeError(f"invalid show-options output: {lines[0]}")
+
+        # ローカル未設定時はグローバル有効値を取得する。
+        cp_global = _run_subprocess(
+            ["tmux", "show-options", "-w", "-g", "-v", "-t", window_target, option_name]
+        )
+        global_lines = [line.strip() for line in cp_global.stdout.decode().splitlines() if line.strip()]
+        if not global_lines:
+            raise RuntimeError(
+                f"show-options returned no output for {window_target}:{option_name}"
+            )
+        return global_lines[0]
+
     def set_pane_title(self, pane_target: str, title: str) -> None:
         """ペインタイトル（pane-border-formatが#{pane_title}）を設定する。"""
         _run_subprocess(["tmux", "select-pane", "-t", pane_target, "-T", title])
@@ -520,7 +548,46 @@ class LibtmuxDriver:
     def set_window_option(self, window_target: str, key: str, value: str) -> None:
         """ウィンドウ限定（-w）でオプションを設定する（非侵襲）。"""
         server = self._ensure_server()
-        server.cmd("set-option", "-w", "-t", window_target, key, value)  # type: ignore[attr-defined]
+        res = server.cmd("set-option", "-w", "-t", window_target, key, value)  # type: ignore[attr-defined]
+        _raise_if_cmd_failed(res, action="set-window-option", target=window_target)
+
+    def get_window_option(self, window_target: str, option_name: str) -> str:
+        """ウィンドウ限定（-w）のオプション値を返す。"""
+        server = self._ensure_server()
+        res = server.cmd("show-options", "-w", "-t", window_target, option_name)  # type: ignore[attr-defined]
+        _raise_if_cmd_failed(res, action="get-window-option", target=window_target)
+        lines = [line for line in _stdout_lines(res) if str(line).strip()]
+        if lines:
+            first = str(lines[0]).strip()
+            parts = first.split(None, 1)
+            if len(parts) != 2:
+                raise RuntimeError(f"invalid show-options output: {first}")
+            key, value = parts
+            if key != option_name:
+                raise RuntimeError(
+                    f"show-options returned unexpected key: expected={option_name} actual={key}"
+                )
+            return value
+
+        # ローカル未設定時はグローバル有効値を取得する。
+        global_res = server.cmd(  # type: ignore[attr-defined]
+            "show-options",
+            "-w",
+            "-g",
+            "-v",
+            "-t",
+            window_target,
+            option_name,
+        )
+        _raise_if_cmd_failed(
+            global_res, action="get-window-option-global", target=window_target
+        )
+        global_lines = [line for line in _stdout_lines(global_res) if str(line).strip()]
+        if not global_lines:
+            raise RuntimeError(
+                f"show-options returned no output for {window_target}:{option_name}"
+            )
+        return str(global_lines[0]).strip()
 
     def set_pane_title(self, pane_target: str, title: str) -> None:
         """ペインタイトル（pane-border-formatが#{pane_title}）を設定する。"""
@@ -844,6 +911,10 @@ class TmuxIO:
     def set_window_option(self, window_target: str, key: str, value: str) -> None:
         """ウィンドウ限定（-w）でオプションを設定する（非侵襲）。"""
         return self.driver.set_window_option(window_target, key, value)
+
+    def get_window_option(self, window_target: str, option_name: str) -> str:
+        """ウィンドウ限定（-w）のオプション値を返す。"""
+        return self.driver.get_window_option(window_target, option_name)
 
     def set_pane_title(self, pane_target: str, title: str) -> None:
         """ペインタイトル（pane-border-formatが#{pane_title}）を設定する。"""

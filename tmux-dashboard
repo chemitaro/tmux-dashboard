@@ -152,6 +152,9 @@ fi
 [[ -n "$dashboard_window_index" ]] || die "failed to locate/create dashboard window"
 dashboard_window_target="${SESSION_NAME}:${dashboard_window_index}"
 
+# Keep dashboard window size policy aligned with active client size.
+tmux set-option -w -t "$dashboard_window_target" window-size latest
+
 runner_cmd+=(--window-target "$dashboard_window_target")
 runner_cmd_str="$(printf '%q ' "${runner_cmd[@]}")"
 runner_cmd_str="${runner_cmd_str% }"

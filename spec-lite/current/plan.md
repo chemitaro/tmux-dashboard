@@ -26,13 +26,13 @@
   - [x] S03: integrity 判定順序と E2E/回帰テストを整え、headless 復旧を保証する
   - [x] S04: wrapper 経路の `create_window` 根本原因を除去し、same-name 条件の回帰テストで固定する（code-complete。acceptance follow-up は S05）
   - [x] S05: 受け入れ検査の fail findings を解消し、default driver / 0 セッション収束の契約を完成させる
-  - [ ] S06: `window-size latest` を dashboard 管理契約として固定し、outer Terminal resize への追随を自動回復付きで保証する
+  - [x] S06: `window-size latest` を dashboard 管理契約として固定し、outer Terminal resize への追随を自動回復付きで保証する
 - historical / superseded steps（任意）:
   - [x] 旧 `planning/current/task.md` による `-p` ベース前提の実装計画（`@spec-lite/completed/20260330_1843_planning-migration/task.md` にアーカイブ済み）
 
 ## 現行の実行対象スコープ (任意)
 - S05: 完了。libtmux fail-closed の取りこぼし補完、ghost residual queue 防止、0 セッション stale title 解消、追加受け入れ回帰の自動化を実施済み
-- S06: 次の実行対象。`window-size manual` 汚染を `latest` へ自動回復し、wrapper / runner の両経路で resize 追随を保証する
+- S06: 完了。`window-size manual` 汚染の自動回復、wrapper / runner 両経路の `latest` 保証、resize 追随回帰の自動検証と手動検証記録を実施済み
 
 ## ネスト運用ルール (必須)
 - トップレベルステップ `Sxx` は「観測可能な成果」で分ける
@@ -417,7 +417,7 @@
   - pane 表示仕様やセッション選定仕様の変更
 
 #### update_plan（着手時に登録） (必須)
-- [ ] `update_plan` に、このステップの作業ブロックを登録した
+- [x] `update_plan` に、このステップの作業ブロックを登録した
 - 登録する作業ブロック:
   - S06-B1: tmuxio window option API の Red/Green
   - S06-B2: wrapper / orchestrator の `latest` 保証 Red/Green
@@ -465,11 +465,11 @@
     - Refactor: `spec-lite/current/report.md` と手動検証レポートを更新し、レビュー境界とコミット境界を一致させる
 
 #### ステップ末尾（省略しない） (必須)
-- [ ] 期待するテストと必要な品質ゲートを実施し、成功した
-- [ ] 必要なレビュー / QA ゲートを通過した、または不要理由を記録した
-- [ ] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
-- [ ] `update_plan` を更新し、このステップの作業ブロックを完了にした
-- [ ] コミット境界を確定した（コミットしない場合は理由を記録した）
+- [x] 期待するテストと必要な品質ゲートを実施し、成功した
+- [x] 必要なレビュー / QA ゲートを通過した、または不要理由を記録した
+- [x] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
+- [x] `update_plan` を更新し、このステップの作業ブロックを完了にした
+- [x] コミット境界を確定した（コミットしない場合は理由を記録した）
 
 ## 未確定事項（TBD） (必須)
 - 該当なし
