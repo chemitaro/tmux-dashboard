@@ -2,10 +2,10 @@
 種別: 設計書
 機能ID: "fix-tmux-headless-layout"
 機能名: "headless tmux でのレイアウト復旧"
-関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331", "window-size manual resize follow-up analysis 20260331"]
+関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331", "window-size manual resize follow-up analysis 20260331", "wrapper visible window duplication analysis 20260401"]
 状態: "draft"
 作成者: "codex"
-最終更新: "2026-03-31"
+最終更新: "2026-04-01"
 依存: ["requirement.md"]
 ---
 
@@ -24,6 +24,7 @@
   - create failure 後に ghost residual target を残さない
   - 0 セッション収束後の pane title を stale session 名のまま残さない
   - `dashboard` target の `window-size` を `latest` として管理し、outer Terminal resize に追随できる状態を維持する
+  - visible dashboard window 名 `dashboard` を swap 後も invariant として維持し、wrapper 再起動で window が増殖しないようにする
 - MUST NOT:
   - attach 必須運用へ仕様変更しない
   - dashboard 以外の tmux 設定へ侵襲しない
@@ -230,10 +231,10 @@
   - `tmux_dashboard/layout.py`: absolute-cell 既定 / `%` fallback の `-l` ベース分割長算出関数を追加し、percent split 前提を更新
   - `tmux_dashboard/tmuxio.py`: split API を `length` 指定へ変更し、CLI/libtmux 両方で `-l` を使う。追加で `create_window()` の target 指定と失敗検知を修正する
   - `tmux_dashboard/orchestrator.py`: staging window ベースの非破壊レイアウト適用、失敗結果処理、integrity チェック順序、mapping 検証を修正し、staging 作成失敗を explicit に扱う。追加で ghost residual target 回避と 0 セッション時 title クリアを実装する
-  - `tmux-dashboard`: visible dashboard window 確定後に `window-size latest` を保証する preflight を追加する
+  - `tmux-dashboard`: visible dashboard window 確定後に `window-size latest` を保証し、canonical visible window への self-heal と duplicate cleanup を行う
   - `tests/test_tmuxio.py`: split 呼び出しの期待値を `-l` ベースへ更新し、`create_window()` の契約と window option 取得/設定の契約を追加検証する
-  - `tests/test_orchestrator.py`: apply_layout の非破壊性、pane 数不足、integrity 順序、staging 作成失敗のテストを追加
-  - `tests/test_e2e_tmux.py`: headless 条件で `-l` 経路が通ることに加え、wrapper と同じ session/window 同名条件、`window-size latest` 収束と resize 追随を検証するケースを追加する
+  - `tests/test_orchestrator.py`: apply_layout の非破壊性、pane 数不足、integrity 順序、staging 作成失敗に加え、swap 後の visible window 名 invariant 回復を検証する
+  - `tests/test_e2e_tmux.py`: headless 条件で `-l` 経路が通ることに加え、wrapper と同じ session/window 同名条件、`window-size latest` 収束、resize 追随、visible dashboard window 一意性を検証するケースを追加する
   - `spec-lite/current/report.md`: 実装ログを追記
 - 削除（Delete）:
   - 該当なし
@@ -253,6 +254,7 @@
   2) staging window で目標レイアウトを `-l` ベースで構築する
   3) pane 数、pane title 設定可能性、必要な split 成功を確認する
   4) 成功時のみ `swap-window -s staging_target -t dashboard:0` を行い、swap 後に staging index 側へ移った旧 `dashboard:0` を `kill-window` する
+  4a) swap 直後に旧 visible window を退避名へ rename し、新しい visible target を `dashboard` へ rename して window 名 invariant を回復する
   5) `swap-window` 失敗は swap 前失敗として扱い、新規 staging window を破棄して既存 `dashboard:0` と runner window を保持する
   6) `kill-window` 失敗は swap 後 cleanup 失敗として扱い、新 `dashboard:0` は成功扱いのまま残し、旧 window 残置を warning で観測する
   7) 成功後の invariant は `dashboard:0` が可視 dashboard、runner window は存続、staging 一時 window は cleanup 成功時のみ消える。cleanup 失敗時は旧 window 残置が warning と一致している、の 4 点とする
@@ -274,6 +276,8 @@
   - 初回起動直後の既定 title は異常扱いしない
 - wrapper 経路:
   - visible window 名 `dashboard` は維持する
+  - 起動時に non-runner windows を列挙し、`dashboard` named window が無ければ active 1 枚または最小 index を canonical visible window として再利用する
+  - canonical visible window は `dashboard` へ rename し、それ以外の non-runner duplicate windows は cleanup する
   - visible dashboard window 確定後に wrapper が `set-window-option -t "$dashboard_window_target" window-size latest` を実行する
   - これにより既存 `manual` 汚染が残る session でも起動時点で自動回復する
 - window-size policy 管理:

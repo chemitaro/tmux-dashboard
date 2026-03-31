@@ -25,6 +25,7 @@ class FakeIO:
         self.create_window_calls = []
         self.swap_window_calls = []
         self.kill_window_calls = []
+        self.rename_window_calls = []
         self.respawn_calls = []
 
         self.fail_split_for_targets = set()
@@ -41,6 +42,7 @@ class FakeIO:
         self._pane_to_window = {}
         self._pane_titles = {}
         self._window_options = {}
+        self._window_names = {}
         self._next_pane_num = 100
 
         self._init_window("dashboard:0", panes)
@@ -53,6 +55,7 @@ class FakeIO:
             self._pane_titles.setdefault(pane_id, "")
         self._details_by_window[window_target] = details
         self._window_options.setdefault(window_target, {"window-size": "manual"})
+        self._window_names.setdefault(window_target, "dashboard" if window_target == "dashboard:0" else "python3.12")
 
     def _new_pane_id(self) -> str:
         self._next_pane_num += 1
@@ -182,14 +185,17 @@ class FakeIO:
         *,
         width: int | None = None,
         height: int | None = None,
+        window_name: str | None = None,
     ):
         target = f"{session_name}:{window_index}"
-        self.create_window_calls.append((session_name, window_index, detached, width, height))
+        self.create_window_calls.append((session_name, window_index, detached, width, height, window_name))
         if target in self.fail_create_window_targets:
             raise RuntimeError("forced create-window failure")
         if target in self._details_by_window:
             raise RuntimeError("window already exists")
         self._init_window(target, [self._new_pane_id()])
+        if window_name is not None:
+            self._window_names[target] = window_name
         if target in self.partial_create_window_targets:
             raise RuntimeError("forced create-window post-create failure")
         return target
@@ -200,17 +206,25 @@ class FakeIO:
             raise RuntimeError("forced swap-window failure")
         src = self._details_by_window[source_target]
         dst = self._details_by_window[destination_target]
+        src_name = self._window_names[source_target]
+        dst_name = self._window_names[destination_target]
         self._details_by_window[source_target], self._details_by_window[destination_target] = dst, src
+        self._window_names[source_target], self._window_names[destination_target] = dst_name, src_name
         for pid, _, _ in self._details_by_window[source_target]:
             self._pane_to_window[pid] = source_target
         for pid, _, _ in self._details_by_window[destination_target]:
             self._pane_to_window[pid] = destination_target
+
+    def rename_window(self, window_target: str, window_name: str):
+        self.rename_window_calls.append((window_target, window_name))
+        self._window_names[window_target] = window_name
 
     def kill_window(self, window_target: str):
         self.kill_window_calls.append(window_target)
         if window_target in self.fail_kill_window_targets:
             raise RuntimeError("forced kill-window failure")
         removed = self._details_by_window.pop(window_target, [])
+        self._window_names.pop(window_target, None)
         for pid, _, _ in removed:
             self._pane_to_window.pop(pid, None)
             self._pane_titles.pop(pid, None)
@@ -246,7 +260,34 @@ def test_scan_sort_exclude_and_titles_and_layout():
     assert plan["rows"] == 1
     assert sorted({title for _, title in io.set_title_calls}) == ["alpha", "beta", "gamma"]
     assert io.swap_window_calls == [("dashboard:99", "dashboard:0")]
-    assert io.create_window_calls == [("dashboard", 99, True, 120, 50)]
+    assert io.create_window_calls == [("dashboard", 99, True, 120, 50, "__tmux_dashboard_staging__99")]
+
+
+def test_run_once_restores_visible_dashboard_window_name_after_swap():
+    """目的: swap 後に visible dashboard window 名 invariant を回復することを確認する。
+    前提: staging window は一時名で作られ、swap により visible target がその名前を受け取る。
+    期待: old window を退避名へ rename し、新しい visible target は `dashboard` へ rename される。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(
+        sessions=["gamma", "dashboard", "alpha", "beta"],
+        width=120,
+        height=50,
+        panes=["%1", "%2", "%3"],
+    )
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+
+    o.run_once(window_target="dashboard:0")
+
+    assert io.rename_window_calls[1:3] == [
+        ("dashboard:99", "__tmux_dashboard_old__99"),
+        ("dashboard:0", "dashboard"),
+    ]
+    assert io.kill_window_calls == ["dashboard:99"]
+    assert io._window_names["dashboard:0"] == "dashboard"
 
 
 def test_apply_layout_split_calls_and_result():
@@ -645,7 +686,7 @@ def test_zero_sessions_clear_stale_single_pane_title():
 def test_run_once_ensures_window_size_latest_in_preflight():
     """目的: run_once の preflight で window-size manual を latest に是正することを確認する。
     前提: dashboard:0 の window-size が manual になっている。
-    期待: run_once 実行後に window-size が latest へ更新される。
+    期待: run_once 実行後に dashboard 名と automatic-rename off と window-size latest が揃う。
     """
     from tmux_dashboard import orchestrator
     from tmux_dashboard import config
@@ -658,6 +699,8 @@ def test_run_once_ensures_window_size_latest_in_preflight():
     _ = o.run_once(window_target="dashboard:0")
 
     assert io.get_window_option("dashboard:0", "window-size") == "latest"
+    assert io.rename_window_calls[0] == ("dashboard:0", "dashboard")
+    assert ("dashboard:0", "automatic-rename", "off") in io.set_window_option_calls
     assert ("dashboard:0", "window-size", "latest") in io.set_window_option_calls
 
 
@@ -683,6 +726,8 @@ def test_ensure_dashboard_window_policy_is_non_intrusive_for_non_dashboard_targe
     o.ensure_dashboard_window_policy("alpha:0")
 
     assert ("alpha:0", "window-size") not in io.get_window_option_calls
+    assert io.rename_window_calls == []
+    assert ("alpha:0", "automatic-rename", "off") not in io.set_window_option_calls
     assert ("alpha:0", "window-size", "latest") not in io.set_window_option_calls
 
 

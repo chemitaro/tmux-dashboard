@@ -371,6 +371,7 @@ class CliDriver:
         *,
         width: int | None = None,
         height: int | None = None,
+        window_name: str | None = None,
     ) -> str:
         """指定セッションに window を作成し target を返す。"""
         requested_target = f"{session_name}:{window_index}"
@@ -385,6 +386,8 @@ class CliDriver:
         ]
         if detached:
             args.insert(2, "-d")
+        if window_name is not None:
+            args.extend(["-n", window_name])
         cp = _run_subprocess(args)
         created = "\n".join(_stdout_lines(cp)).strip()
         created_target = created or requested_target
@@ -399,6 +402,10 @@ class CliDriver:
                 resize_args.extend(["-y", str(height)])
             _run_subprocess(resize_args)
         return created_target
+
+    def rename_window(self, window_target: str, window_name: str) -> None:
+        """window 名を更新する。"""
+        _run_subprocess(["tmux", "rename-window", "-t", window_target, window_name])
 
     def swap_window(self, source_target: str, destination_target: str) -> None:
         """2つの window を入れ替える。"""
@@ -820,6 +827,7 @@ class LibtmuxDriver:
         *,
         width: int | None = None,
         height: int | None = None,
+        window_name: str | None = None,
     ) -> str:
         """指定セッションに window を作成し target を返す。"""
         server = self._ensure_server()
@@ -827,6 +835,8 @@ class LibtmuxDriver:
         args = ["new-window", "-P", "-F", "#{session_name}:#{window_index}", "-t", requested_target]
         if detached:
             args.insert(1, "-d")
+        if window_name is not None:
+            args.extend(["-n", window_name])
         res = server.cmd(*args)  # type: ignore[attr-defined]
         _raise_if_cmd_failed(res, action="create-window", target=requested_target)
         created = ""
@@ -847,6 +857,12 @@ class LibtmuxDriver:
                 resize_args.extend(["-y", str(height)])
             server.cmd(*resize_args)  # type: ignore[attr-defined]
         return created_target
+
+    def rename_window(self, window_target: str, window_name: str) -> None:
+        """window 名を更新する。"""
+        server = self._ensure_server()
+        res = server.cmd("rename-window", "-t", window_target, window_name)  # type: ignore[attr-defined]
+        _raise_if_cmd_failed(res, action="rename-window", target=window_target)
 
     def swap_window(self, source_target: str, destination_target: str) -> None:
         """2つの window を入れ替える。"""
@@ -987,6 +1003,7 @@ class TmuxIO:
         *,
         width: int | None = None,
         height: int | None = None,
+        window_name: str | None = None,
     ) -> str:
         """指定セッションに window を作成し target を返す。"""
         return self.driver.create_window(
@@ -995,7 +1012,12 @@ class TmuxIO:
             detached,
             width=width,
             height=height,
+            window_name=window_name,
         )
+
+    def rename_window(self, window_target: str, window_name: str) -> None:
+        """window 名を更新する。"""
+        return self.driver.rename_window(window_target, window_name)
 
     def swap_window(self, source_target: str, destination_target: str) -> None:
         """2つの window を入れ替える。"""

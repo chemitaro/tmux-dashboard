@@ -100,6 +100,14 @@ class Orchestrator:
             idx += 1
         return idx
 
+    def _staging_window_name(self, window_index: int) -> str:
+        """staging window 用の一時名を返す。"""
+        return f"__tmux_dashboard_staging__{window_index}"
+
+    def _retired_window_name(self, window_index: int) -> str:
+        """swap 後に旧 visible window へ付ける退避名を返す。"""
+        return f"__tmux_dashboard_old__{window_index}"
+
     def apply_layout(
         self,
         window_target: str,
@@ -247,10 +255,12 @@ class Orchestrator:
         self.io.set_pane_title(panes[0], "")
 
     def ensure_dashboard_window_policy(self, window_target: str) -> None:
-        """dashboard 管理 window の window-size policy を latest に収束させる。"""
+        """dashboard 管理 window の名前と rename policy と size policy を収束させる。"""
         if not window_target.startswith("dashboard:"):
             return
         logger = logging.getLogger("tmux_dashboard.orchestrator")
+        self.io.rename_window(window_target, "dashboard")
+        self.io.set_window_option(window_target, "automatic-rename", "off")
         current = self.io.get_window_option(window_target, "window-size")
         if current == "latest":
             return
@@ -389,6 +399,7 @@ class Orchestrator:
                     detached=True,
                     width=W,
                     height=H,
+                    window_name=self._staging_window_name(staging_index),
                 )
             except Exception as create_error:
                 self._log_apply_error(
@@ -437,6 +448,11 @@ class Orchestrator:
 
             try:
                 self.io.swap_window(staging_target, window_target)
+                self.io.rename_window(
+                    staging_target,
+                    self._retired_window_name(staging_index),
+                )
+                self.io.rename_window(window_target, "dashboard")
             except Exception as swap_error:
                 self._log_apply_error(
                     logger,
