@@ -93,6 +93,11 @@ def _window_names(session_name: str) -> list[str]:
     return [x for x in cp.stdout.decode().splitlines() if x]
 
 
+def _window_rows(session_name: str) -> list[str]:
+    cp = _sh(["tmux", "list-windows", "-t", session_name, "-F", "#{window_index}|#{window_name}|#{window_active}"])
+    return [x for x in cp.stdout.decode().splitlines() if x]
+
+
 def _wait_until(predicate, *, timeout: float = 8.0, interval: float = 0.1):
     deadline = time.monotonic() + timeout
     last_error = None
@@ -175,7 +180,7 @@ def test_e2e_same_name_session_and_window_still_builds_layout(tmp_path):
 
 
 def test_e2e_wrapper_path_builds_layout_and_runner_window():
-    """実際の wrapper 経路でも dashboard/runner window を作成し、複数 pane と titles を得られる。"""
+    """実際の wrapper 経路でも visible dashboard を 1 枚に保ち、複数 pane と titles を得られる。"""
     repo_dir = Path(__file__).resolve().parents[1]
     for name in ["alpha", "beta", "gamma"]:
         _create_session(name)
@@ -185,16 +190,17 @@ def test_e2e_wrapper_path_builds_layout_and_runner_window():
 
     _wait_until(
         lambda: "__tmux_dashboard_runner__" in set(_window_names("dashboard"))
+        and set(_window_names("dashboard")) == {"dashboard", "__tmux_dashboard_runner__"}
         and set(_pane_titles("dashboard:0")) == {"alpha", "beta", "gamma"}
         and len(_pane_widths("dashboard:0")) == 3
     )
 
-    assert "__tmux_dashboard_runner__" in set(_window_names("dashboard"))
+    assert set(_window_names("dashboard")) == {"dashboard", "__tmux_dashboard_runner__"}
     assert len(_pane_widths("dashboard:0")) == 3
 
 
 def test_e2e_wrapper_path_zero_sessions_clear_stale_title():
-    """wrapper 経路で全対象セッションが消えた後、dashboard:0 は 1 pane / 空 title へ収束する。"""
+    """wrapper 経路で全対象セッションが消えた後も visible dashboard は 1 枚に保たれる。"""
     repo_dir = Path(__file__).resolve().parents[1]
     for name in ["alpha", "beta"]:
         _create_session(name)
@@ -204,6 +210,7 @@ def test_e2e_wrapper_path_zero_sessions_clear_stale_title():
 
     _wait_until(
         lambda: "__tmux_dashboard_runner__" in set(_window_names("dashboard"))
+        and set(_window_names("dashboard")) == {"dashboard", "__tmux_dashboard_runner__"}
         and set(_pane_titles("dashboard:0")) == {"alpha", "beta"}
         and len(_pane_widths("dashboard:0")) == 2
     )
@@ -213,6 +220,7 @@ def test_e2e_wrapper_path_zero_sessions_clear_stale_title():
 
     _wait_until(
         lambda: len(_pane_widths("dashboard:0")) == 1
+        and set(_window_names("dashboard")) == {"dashboard", "__tmux_dashboard_runner__"}
         and _pane_title_rows("dashboard:0") == ["0|"]
     )
 
@@ -354,6 +362,7 @@ def test_e2e_wrapper_recovers_manual_and_follows_resize():
 
     _wait_until(
         lambda: "__tmux_dashboard_runner__" in set(_window_names("dashboard"))
+        and set(_window_names("dashboard")) == {"dashboard", "__tmux_dashboard_runner__"}
         and _window_option("dashboard:0", "window-size") == "latest"
         and set(_pane_titles("dashboard:0")) == {"alpha", "beta", "gamma"}
     )
@@ -361,6 +370,7 @@ def test_e2e_wrapper_recovers_manual_and_follows_resize():
     _sh(["tmux", "resize-window", "-t", "dashboard:0", "-x", "79", "-y", "40"])
     _wait_until(
         lambda: _window_width("dashboard:0") == 79
+        and set(_window_names("dashboard")) == {"dashboard", "__tmux_dashboard_runner__"}
         and len(_pane_widths("dashboard:0")) == 3
         and all(width == 79 for width in _pane_widths("dashboard:0"))
     )
@@ -368,6 +378,7 @@ def test_e2e_wrapper_recovers_manual_and_follows_resize():
     _sh(["tmux", "resize-window", "-t", "dashboard:0", "-x", "191", "-y", "98"])
     _wait_until(
         lambda: _window_width("dashboard:0") == 191
+        and set(_window_names("dashboard")) == {"dashboard", "__tmux_dashboard_runner__"}
         and len(_pane_widths("dashboard:0")) == 3
         and max(_pane_widths("dashboard:0")) > 79
     )

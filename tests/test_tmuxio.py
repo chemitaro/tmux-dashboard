@@ -493,8 +493,8 @@ def test_libtmux_split_raises_value_error_when_length_and_percent_missing():
 
 def test_cli_window_lifecycle_commands(monkeypatch):
     """目的: CLI経路の window lifecycle API を確認する。
-    前提: create/swap/kill を順に実行する。
-    期待: tmux の new-window/swap-window/kill-window が正しい引数で呼ばれる。
+    前提: create/rename/swap/kill を順に実行する。
+    期待: tmux の new-window/rename-window/swap-window/kill-window が正しい引数で呼ばれる。
     """
     from tmux_dashboard import tmuxio
     from tmux_dashboard import config
@@ -513,21 +513,23 @@ def test_cli_window_lifecycle_commands(monkeypatch):
     c.tmux.driver = "cli"
     io = tmuxio.create_from_config(c)
 
-    target = io.create_window("dashboard", 99, detached=True, width=120, height=50)
+    target = io.create_window("dashboard", 99, detached=True, width=120, height=50, window_name="__staging__99")
+    io.rename_window("dashboard:99", "dashboard")
     io.swap_window("dashboard:99", "dashboard:0")
     io.kill_window("dashboard:99")
 
     assert target == "dashboard:99"
-    assert any("new-window -d -P -F #{session_name}:#{window_index} -t dashboard:99" in cmd for cmd in issued)
+    assert any("new-window -d -P -F #{session_name}:#{window_index} -t dashboard:99 -n __staging__99" in cmd for cmd in issued)
     assert any("resize-window -t dashboard:99 -x 120 -y 50" in cmd for cmd in issued)
     assert any("list-panes -t dashboard:99 -F #{pane_id}" in cmd for cmd in issued)
+    assert any("rename-window -t dashboard:99 dashboard" in cmd for cmd in issued)
     assert any("swap-window -s dashboard:99 -t dashboard:0" in cmd for cmd in issued)
     assert any("kill-window -t dashboard:99" in cmd for cmd in issued)
 
 
 def test_libtmux_window_lifecycle_calls():
     """目的: libtmux経路の window lifecycle API を確認する。
-    前提: create/swap/kill を順に実行する。
+    前提: create/rename/swap/kill を順に実行する。
     期待: server.cmd が対応コマンドで呼ばれる。
     """
     from tmux_dashboard import tmuxio
@@ -551,7 +553,8 @@ def test_libtmux_window_lifecycle_calls():
     io = tmuxio.create_from_config(c)
     io.driver._server = FakeServer()  # type: ignore[attr-defined]
 
-    target = io.create_window("dashboard", 99, detached=True, width=120, height=50)
+    target = io.create_window("dashboard", 99, detached=True, width=120, height=50, window_name="__staging__99")
+    io.rename_window("dashboard:99", "dashboard")
     io.swap_window("dashboard:99", "dashboard:0")
     io.kill_window("dashboard:99")
 
@@ -564,9 +567,12 @@ def test_libtmux_window_lifecycle_calls():
         "#{session_name}:#{window_index}",
         "-t",
         "dashboard:99",
+        "-n",
+        "__staging__99",
     ] in server_calls
     assert ["list-panes", "-t", "dashboard:99", "-F", "#{pane_id}"] in server_calls
     assert ["resize-window", "-t", "dashboard:99", "-x", "120", "-y", "50"] in server_calls
+    assert ["rename-window", "-t", "dashboard:99", "dashboard"] in server_calls
     assert ["swap-window", "-s", "dashboard:99", "-t", "dashboard:0"] in server_calls
     assert ["kill-window", "-t", "dashboard:99"] in server_calls
 

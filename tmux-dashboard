@@ -128,6 +128,44 @@ runner_output_tail() {
   tmux capture-pane -p -t "$pane_target" 2>/dev/null | tail -n 40 || true
 }
 
+list_session_windows() {
+  tmux list-windows -t "$SESSION_NAME" -F "#{window_index}|#{window_name}|#{window_active}"
+}
+
+pick_canonical_dashboard_window_index() {
+  local rows="$1"
+  local idx=""
+  idx="$(printf '%s\n' "$rows" | awk -F '|' -v runner="$RUNNER_WINDOW_NAME" '$2=="dashboard" && $2!=runner {print $1; exit}')"
+  if [[ -n "$idx" ]]; then
+    printf '%s\n' "$idx"
+    return 0
+  fi
+
+  local active_matches=""
+  active_matches="$(printf '%s\n' "$rows" | awk -F '|' -v runner="$RUNNER_WINDOW_NAME" '$2!=runner && $3=="1" {print $1}')"
+  if [[ -n "$active_matches" ]] && [[ "$(printf '%s\n' "$active_matches" | wc -l | tr -d ' ')" == "1" ]]; then
+    printf '%s\n' "$active_matches"
+    return 0
+  fi
+
+  printf '%s\n' "$rows" | awk -F '|' -v runner="$RUNNER_WINDOW_NAME" '$2!=runner {print $1; exit}'
+}
+
+cleanup_duplicate_dashboard_windows() {
+  local canonical_index="$1"
+  local rows="$2"
+  while IFS='|' read -r idx name _active; do
+    [[ -n "$idx" ]] || continue
+    if [[ "$name" == "$RUNNER_WINDOW_NAME" ]]; then
+      continue
+    fi
+    if [[ "$idx" == "$canonical_index" ]]; then
+      continue
+    fi
+    tmux kill-window -t "${SESSION_NAME}:${idx}" || die "failed to cleanup duplicate dashboard window: ${SESSION_NAME}:${idx}"
+  done <<< "$rows"
+}
+
 # Resolve repo root from this script location (works even when invoked via symlink).
 SCRIPT_REALPATH="$(resolve_script_path "$0")"
 REPO_DIR="${TMUX_DASHBOARD_REPO_DIR:-$(cd "$(dirname "$SCRIPT_REALPATH")" && pwd)}"
@@ -156,11 +194,9 @@ if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
   tmux new-session -d -s "$SESSION_NAME" -n "$DASHBOARD_WINDOW_NAME" -c "$REPO_DIR"
 fi
 
-# Ensure the visible tiled dashboard window exists.
-dashboard_window_index="$(
-  tmux list-windows -t "$SESSION_NAME" -F "#{window_index}|#{window_name}" \
-    | awk -F '|' -v name="$DASHBOARD_WINDOW_NAME" '$2==name{print $1; exit}'
-)"
+# Ensure the visible tiled dashboard window exists and is canonical.
+window_rows="$(list_session_windows)"
+dashboard_window_index="$(pick_canonical_dashboard_window_index "$window_rows")"
 if [[ -z "$dashboard_window_index" ]]; then
   any_window_index="$(
     tmux list-windows -t "$SESSION_NAME" -F "#{window_index}" 2>/dev/null | head -n1
@@ -168,13 +204,15 @@ if [[ -z "$dashboard_window_index" ]]; then
   [[ -n "$any_window_index" ]] || die "failed to locate an existing window in session: $SESSION_NAME"
   any_window_target="${SESSION_NAME}:${any_window_index}"
   tmux new-window -d -a -t "$any_window_target" -n "$DASHBOARD_WINDOW_NAME" -c "$REPO_DIR"
-  dashboard_window_index="$(
-    tmux list-windows -t "$SESSION_NAME" -F "#{window_index}|#{window_name}" \
-      | awk -F '|' -v name="$DASHBOARD_WINDOW_NAME" '$2==name{print $1; exit}'
-  )"
+  window_rows="$(list_session_windows)"
+  dashboard_window_index="$(pick_canonical_dashboard_window_index "$window_rows")"
 fi
 [[ -n "$dashboard_window_index" ]] || die "failed to locate/create dashboard window"
 dashboard_window_target="${SESSION_NAME}:${dashboard_window_index}"
+tmux rename-window -t "$dashboard_window_target" "$DASHBOARD_WINDOW_NAME"
+tmux set-option -w -t "$dashboard_window_target" automatic-rename off
+window_rows="$(list_session_windows)"
+cleanup_duplicate_dashboard_windows "$dashboard_window_index" "$window_rows"
 
 # Keep dashboard window size policy aligned with active client size.
 tmux set-option -w -t "$dashboard_window_target" window-size latest
@@ -198,6 +236,7 @@ if [[ -z "$runner_window_index" ]]; then
 fi
 [[ -n "$runner_window_index" ]] || die "failed to create runner window"
 runner_window_target="${SESSION_NAME}:${runner_window_index}"
+tmux set-option -w -t "$runner_window_target" automatic-rename off
 tmux set-option -w -t "$runner_window_target" remain-on-exit on
 
 # If the runner pane isn't running tmux_dashboard, respawn it.

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 from pathlib import Path
 
@@ -59,6 +60,18 @@ def window_by_name(name):
             return item
     return None
 
+def window_by_index(index):
+    for item in state["windows"]:
+        if item["index"] == index:
+            return item
+    return None
+
+def target_to_window(target):
+    _, index = target.split(":", 1)
+    if "." in index:
+        index = index.split(".", 1)[0]
+    return window_by_index(int(index))
+
 if args[:2] == ["has-session", "-t"]:
     sys.exit(0 if state["session_exists"] and args[2] == "dashboard" else 1)
 
@@ -80,7 +93,7 @@ if args[:3] == ["list-windows", "-t", "dashboard"]:
         if fmt == "#{window_index}|#{window_name}":
             lines.append(f"{item['index']}|{item['name']}")
         elif fmt == "#{window_index}|#{window_name}|#{window_active}":
-            active = "1" if item["index"] == 0 else "0"
+            active = "1" if item["index"] == state.get("active_index", 0) else "0"
             lines.append(f"{item['index']}|{item['name']}|{active}")
     if lines:
         sys.stdout.write("\\n".join(lines) + "\\n")
@@ -93,8 +106,9 @@ if args[:3] == ["new-window", "-d", "-a"]:
     name = args[args.index("-n") + 1]
     target = window_by_name(name)
     if target is None:
+      next_index = max([item["index"] for item in state["windows"]], default=-1) + 1
       state["windows"].append({
-          "index": 1,
+          "index": next_index,
           "name": name,
           "pane_dead": "0",
           "pane_start_command": "zsh",
@@ -102,23 +116,36 @@ if args[:3] == ["new-window", "-d", "-a"]:
       save()
     sys.exit(0)
 
+if args[:2] == ["rename-window", "-t"]:
+    target = target_to_window(args[2])
+    if target is None:
+        sys.exit(1)
+    target["name"] = args[3]
+    save()
+    sys.exit(0)
+
+if args[:2] == ["kill-window", "-t"]:
+    target = args[2]
+    _, index = target.split(":", 1)
+    state["windows"] = [item for item in state["windows"] if item["index"] != int(index)]
+    save()
+    sys.exit(0)
+
 if args[:2] == ["display-message", "-p"]:
     target = args[args.index("-t") + 1]
     fmt = args[-1]
-    if target == "dashboard:1.0":
-        runner = window_by_name("__tmux_dashboard_runner__")
-        if runner is None:
-            sys.exit(1)
+    target_window = target_to_window(target)
+    if target_window is not None:
         if fmt == "#{pane_dead}|#{pane_start_command}":
-            sys.stdout.write(f"{runner['pane_dead']}|{runner['pane_start_command']}\\n")
+            sys.stdout.write(f"{target_window['pane_dead']}|{target_window['pane_start_command']}\\n")
             sys.exit(0)
         if fmt == "#{pane_dead}":
-            sys.stdout.write(f"{runner['pane_dead']}\\n")
+            sys.stdout.write(f"{target_window['pane_dead']}\\n")
             sys.exit(0)
     sys.exit(1)
 
 if args[:2] == ["respawn-pane", "-k"]:
-    runner = window_by_name("__tmux_dashboard_runner__")
+    runner = target_to_window(args[args.index("-t") + 1])
     if runner is None:
         sys.stderr.write("can't find window: 1\\n")
         sys.exit(1)
@@ -176,6 +203,42 @@ def _run_wrapper(tmp_path: Path, *, import_ok: bool, runner_fail: bool) -> subpr
     return subprocess.run([str(script)], capture_output=True, text=True, env=env)
 
 
+def _run_wrapper_with_state(
+    tmp_path: Path,
+    *,
+    state: dict,
+    import_ok: bool = True,
+    runner_fail: bool = False,
+) -> tuple[subprocess.CompletedProcess[str], dict]:
+    """preload した fake tmux state で wrapper を実行し、更新後 state を返す。
+
+    前提: state には dashboard session 相当の windows 配列を入れる。
+    期待: wrapper の startup self-heal による rename / cleanup 結果を state として観測できる。
+    """
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python"
+    fake_tmux = fake_bin / "tmux"
+    state_file = tmp_path / "tmux-state.json"
+    _write_fake_python(fake_python)
+    _write_fake_tmux(fake_tmux, state_file)
+    state_file.write_text(json.dumps(state), encoding="utf-8")
+
+    script = Path(__file__).resolve().parents[1] / "tmux-dashboard"
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["TMUX_DASHBOARD_PYTHON_BIN"] = str(fake_python)
+    env["TMUX_DASHBOARD_SKIP_ATTACH"] = "1"
+    env["TMUX_DASHBOARD_RUNNER_GRACE_SEC"] = "0"
+    env["FAKE_TMUX_STATE"] = str(state_file)
+    env["FAKE_PYTHON_IMPORT_OK"] = "1" if import_ok else "0"
+    env["FAKE_TMUX_RUNNER_FAIL"] = "1" if runner_fail else "0"
+    env["FAKE_TMUX_CAPTURE_OUTPUT"] = "Traceback: runner died\\n"
+
+    proc = subprocess.run([str(script)], capture_output=True, text=True, env=env)
+    return proc, json.loads(state_file.read_text(encoding="utf-8"))
+
+
 def test_wrapper_fails_fast_when_virtualenv_imports_are_broken(tmp_path):
     """壊れた `.venv` では tmux 操作前に fail-fast する。
 
@@ -213,3 +276,28 @@ def test_wrapper_succeeds_when_runtime_and_runner_are_healthy(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert "broken virtualenv" not in proc.stderr
     assert "runner bootstrap failed before attach" not in proc.stderr
+
+
+def test_wrapper_self_heals_duplicate_visible_windows_before_starting_runner(tmp_path):
+    """duplicate visible windows がある場合でも canonical 1 枚へ収束させる。
+
+    前提: dashboard session には `python3.12` named windows が 2 枚あり、`dashboard` named window は存在しない。
+    期待: 最小 index が `dashboard` に rename され、他の non-runner window は cleanup される。
+    """
+    initial_state = {
+        "session_exists": True,
+        "active_index": 0,
+        "capture_output": "",
+        "windows": [
+            {"index": 0, "name": "python3.12", "pane_dead": "0", "pane_start_command": "zsh"},
+            {"index": 1, "name": "python3.12", "pane_dead": "0", "pane_start_command": "zsh"},
+        ],
+    }
+
+    proc, state = _run_wrapper_with_state(tmp_path, state=initial_state)
+
+    assert proc.returncode == 0, proc.stderr
+    assert sorted((item["index"], item["name"]) for item in state["windows"]) == [
+        (0, "dashboard"),
+        (1, "__tmux_dashboard_runner__"),
+    ]

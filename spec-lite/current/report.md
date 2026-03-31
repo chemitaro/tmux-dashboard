@@ -1193,3 +1193,60 @@ make doctor
 - ベストプラクティスは「setup に `uv`、runtime に `.venv/bin/python`」である。
 - runtime で `uv` cache や editable 解決に再依存すると、ローカル固有 cache path / 権限差分を毎回踏むため不安定になる。
 - broken `.venv` は attach 後ではなく attach 前に止める方が障害切り分けコストを最小化できる。
+
+---
+
+## 2026-04-01 visible dashboard window invariant 実装
+
+### 概要
+- `swap-window` 後に visible dashboard window 名が `dashboard` から既定名へ崩れ、wrapper 再起動時に visible window が増殖する問題を修正した。
+- 方針は「staging window を一時名付きで作る」「swap 後に visible target 名を `dashboard` へ戻す」「`automatic-rename off` で名前 drift を止める」「wrapper 起動時に duplicate visible windows を自己回復する」の 4 点に固定した。
+
+### 実施内容
+- `tmux_dashboard/tmuxio.py` に `create_window(..., window_name=...)` と `rename_window()` を追加し、CLI / libtmux の両経路で window 命名を明示できるようにした。
+- `tmux_dashboard/orchestrator.py` で staging window を `__tmux_dashboard_staging__<index>` として作成し、`swap-window` 後に退役側を `__tmux_dashboard_old__<index>`、visible 側を `dashboard` へ rename してから old window を kill する順序へ変更した。
+- `tmux_dashboard/orchestrator.py` と `tmux-dashboard` wrapper の双方で `automatic-rename off` を設定し、active pane の `python3.12` へ window 名が戻る drift を防止した。
+- `tmux-dashboard` wrapper に canonical visible window 選定と duplicate cleanup を追加し、`dashboard` 名の window が欠損していても起動時に self-heal できるようにした。
+- `tests/test_tmuxio.py` / `tests/test_orchestrator.py` / `tests/test_wrapper_runtime.py` / `tests/test_e2e_tmux.py` を更新し、rename invariant、duplicate cleanup、wrapper 再起動時の window 一意性を固定した。
+- `spec-lite/current/requirement.md` / `design.md` / `plan.md` に AC-009 / EC-011 と S07 を反映し、visible dashboard window を 1 つに収束させる契約を明文化した。
+
+### 実行コマンド / 結果
+```bash
+bash -n tmux-dashboard
+.venv/bin/python -m pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_wrapper_runtime.py tests/test_wrapper_help.py -q
+.venv/bin/python -m pytest tests/test_e2e_tmux.py -q -k 'wrapper_path_builds_layout_and_runner_window or wrapper_path_zero_sessions_clear_stale_title or wrapper_recovers_manual_and_follows_resize'
+
+# 手動確認:
+tmux list-windows -t dashboard -F '#{window_index}|#{window_name}|#{window_active}|#{window_panes}'
+tmux list-panes -t dashboard:0 -F '#{pane_index}|#{pane_title}|#{pane_width}x#{pane_height}|#{pane_current_command}'
+tmux capture-pane -pt dashboard:1.0
+
+# 結果:
+# - shell syntax check は成功
+# - unit / wrapper tests は 44 passed
+# - wrapper E2E 3 件はこの環境で skip（tmux usable 判定により未実行）
+# - 実機 tmux では初回起動直後から window 名集合が {"dashboard", "__tmux_dashboard_runner__"} に収束
+# - 実機 tmux では dashboard / runner とも `automatic-rename` は 0 (off)
+# - 再度 wrapper を起動しても duplicate visible window は増えず、runner は継続して dashboard:0 を追従
+```
+
+### 変更したファイル
+- `tmux_dashboard/tmuxio.py`
+- `tmux_dashboard/orchestrator.py`
+- `tmux-dashboard`
+- `tests/test_tmuxio.py`
+- `tests/test_orchestrator.py`
+- `tests/test_wrapper_runtime.py`
+- `tests/test_e2e_tmux.py`
+- `spec-lite/current/requirement.md`
+- `spec-lite/current/design.md`
+- `spec-lite/current/plan.md`
+- `spec-lite/current/report.md`
+
+### コミット
+- 未実施（このログ追記後にコミット予定）
+
+### 判断
+- visible dashboard window 名は orchestrator 側で primary invariant として回復し、wrapper 側で startup remediation を持つ二層構成が最も堅い。
+- `swap-window` は pane だけでなく window 名も入れ替えるため、post-swap rename を入れない限り wrapper の name-based lookup は再び破綻する。
+- wrapper 起動時の duplicate cleanup を入れておくことで、過去バージョンが残した壊れた session 構成も 1 回の起動で収束させられる。

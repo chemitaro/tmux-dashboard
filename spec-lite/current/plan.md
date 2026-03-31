@@ -2,18 +2,18 @@
 種別: 実装計画書
 機能ID: "fix-tmux-headless-layout"
 機能名: "headless tmux でのレイアウト復旧"
-関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331", "window-size manual resize follow-up analysis 20260331"]
+関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331", "window-size manual resize follow-up analysis 20260331", "wrapper visible window duplication analysis 20260401"]
 状態: "draft"
 作成者: "codex"
-最終更新: "2026-03-31"
+最終更新: "2026-04-01"
 依存: ["requirement.md", "design.md"]
 ---
 
 # fix-tmux-headless-layout headless tmux でのレイアウト復旧 — 実装計画（TDD: Red → Green → Refactor）
 
 ## この計画で満たす要件ID (必須)
-- 対象AC: AC-001, AC-002, AC-003, AC-004, AC-005, AC-006, AC-007, AC-008
-- 対象EC: EC-001, EC-002, EC-003, EC-004, EC-005, EC-006, EC-007, EC-008, EC-009, EC-010
+- 対象AC: AC-001, AC-002, AC-003, AC-004, AC-005, AC-006, AC-007, AC-008, AC-009
+- 対象EC: EC-001, EC-002, EC-003, EC-004, EC-005, EC-006, EC-007, EC-008, EC-009, EC-010, EC-011
 - 対象制約（該当があれば）:
   - 依存追加なし
   - CLI 互換維持
@@ -27,12 +27,14 @@
   - [x] S04: wrapper 経路の `create_window` 根本原因を除去し、same-name 条件の回帰テストで固定する（code-complete。acceptance follow-up は S05）
   - [x] S05: 受け入れ検査の fail findings を解消し、default driver / 0 セッション収束の契約を完成させる
   - [x] S06: `window-size latest` を dashboard 管理契約として固定し、outer Terminal resize への追随を自動回復付きで保証する
+  - [x] S07: visible dashboard window 名 invariant を固定し、wrapper 再起動で window が増殖しないようにする
 - historical / superseded steps（任意）:
   - [x] 旧 `planning/current/task.md` による `-p` ベース前提の実装計画（`@spec-lite/completed/20260330_1843_planning-migration/task.md` にアーカイブ済み）
 
 ## 現行の実行対象スコープ (任意)
 - S05: 完了。libtmux fail-closed の取りこぼし補完、ghost residual queue 防止、0 セッション stale title 解消、追加受け入れ回帰の自動化を実施済み
 - S06: 完了。`window-size manual` 汚染の自動回復、wrapper / runner 両経路の `latest` 保証、resize 追随回帰の自動検証と手動検証記録を実施済み
+- S07: 完了。staging window の一時命名、swap 後 rename、`automatic-rename off`、wrapper startup self-heal、visible dashboard window 一意性の回帰を追加した
 
 ## ネスト運用ルール (必須)
 - トップレベルステップ `Sxx` は「観測可能な成果」で分ける
@@ -50,6 +52,7 @@
   - AC-006 → S04, S05
   - AC-007 → S05
   - AC-008 → S06
+  - AC-009 → S07
   - EC-001 → S02, S05
   - EC-002 → S02, S03
   - EC-003 → S02
@@ -60,7 +63,8 @@
   - EC-008 → S05
   - EC-009 → S06
   - EC-010 → S06
-  - 非交渉制約 → S01, S02, S03, S04, S05, S06
+  - EC-011 → S07
+  - 非交渉制約 → S01, S02, S03, S04, S05, S06, S07
 
 ## レビュー / QA ゲート方針 (必須)
 - G1:
@@ -470,6 +474,55 @@
 - [x] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
 - [x] `update_plan` を更新し、このステップの作業ブロックを完了にした
 - [x] コミット境界を確定した（コミットしない場合は理由を記録した）
+
+### S07 — visible dashboard window 名 invariant を固定し、wrapper 再起動で window が増殖しないようにする (必須)
+- 対象: AC-009 / EC-011 / 制約: CLI 互換維持, dashboard 以外の tmux 設定非侵襲
+- 設計参照:
+  - 対象IF/API: `TmuxIO.create_window(..., window_name=...)`, `TmuxIO.rename_window(...)`
+  - 対象テスト:
+    - `tests/test_tmuxio.py`
+    - `tests/test_orchestrator.py`
+    - `tests/test_wrapper_runtime.py`
+    - `tests/test_e2e_tmux.py`
+- このステップで「追加しないこと（スコープ固定）」:
+  - pane 表示仕様やセッション選定仕様の変更
+  - runner の描画アルゴリズム変更
+
+#### update_plan（着手時に登録） (必須)
+- [x] `update_plan` に、このステップの作業ブロックを登録した
+- 登録する作業ブロック:
+  - S07-B1: tmuxio window rename API の Red/Green
+  - S07-B2: orchestrator の post-swap rename invariant
+  - S07-B3: wrapper startup self-heal と duplicate cleanup
+  - S07-B4: E2E / 手動確認 / 報告 / コミット
+
+#### 期待する振る舞い（テストケース） (必須)
+- Given: `swap-window` で staging 由来の既定名 window が visible target に昇格する条件、または wrapper 起動時に duplicate non-runner windows が残っている条件
+- When: orchestrator がレイアウト適用を完了する、または wrapper を起動する
+- Then: visible target は必ず `dashboard` 名へ戻り、`dashboard` session 内の tool-managed window は visible dashboard 1 枚と runner 1 枚へ収束する
+- 観測点（UI/HTTP/DB/Log など）: `tmux list-windows -t dashboard -F '#{window_index}|#{window_name}|#{window_active}'`, runner `pane_start_command`, unit/E2E/手動確認結果
+
+#### 作業ブロック（必須）
+- S07-B1: tmuxio window naming API
+  - S07-B1-I1:
+    - Red: create/rename lifecycle テストを追加し、window 名を制御できない現状を失敗で固定する
+    - Green: CLI / libtmux driver に `window_name` 付き `create_window()` と `rename_window()` を追加する
+    - Refactor: lifecycle command helper と fail-closed 契約を整理する
+- S07-B2: orchestrator の post-swap invariant
+  - S07-B2-I1:
+    - Red: swap 後に visible window 名が `dashboard` に戻らないテストを追加する
+    - Green: staging 一時名、old window 退避名、visible target の `dashboard` rename を実装する
+    - Refactor: staging / retired window 名の helper を導入し、命名契約を固定する
+- S07-B3: wrapper startup self-heal
+  - S07-B3-I1:
+    - Red: duplicate visible windows があると wrapper が stale target を温存するテストを追加する
+    - Green: canonical visible window 選定、`dashboard` rename、duplicate non-runner cleanup を実装する
+    - Refactor: visible window 探索と cleanup helper を shell 関数へ抽出する
+- S07-B4: E2E / 手動確認 / 報告 / コミット
+  - S07-B4-I1:
+    - Red: wrapper E2E に visible dashboard window 一意性の検証を追加する
+    - Green: wrapper path / zero-session / resize 回帰で window 名集合が `{"dashboard", "__tmux_dashboard_runner__"}` に収束することを確認する
+    - Refactor: `spec-lite/current/report.md` に手動確認ログと判断を追記し、コミット境界を確定する
 
 ## 未確定事項（TBD） (必須)
 - 該当なし

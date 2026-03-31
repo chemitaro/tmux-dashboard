@@ -2,10 +2,10 @@
 種別: 要件定義書
 機能ID: "fix-tmux-headless-layout"
 機能名: "headless tmux でのレイアウト復旧"
-関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331", "window-size manual resize follow-up analysis 20260331"]
+関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331", "window-size manual resize follow-up analysis 20260331", "wrapper visible window duplication analysis 20260401"]
 状態: "draft"
 作成者: "codex"
-最終更新: "2026-03-31"
+最終更新: "2026-04-01"
 ---
 
 # fix-tmux-headless-layout headless tmux でのレイアウト復旧 — 要件定義（WHAT / WHY）
@@ -127,6 +127,7 @@
 - R-002: tmux バージョン差で `-l 50%` の解釈差がある可能性
 - R-003: 既存 E2E の `xfail` を縮小する際、環境依存でテストが不安定になる可能性
 - R-004: `window-size latest` は最後に active になった client に寄るため、同じ `dashboard` session を複数 client で同時監視する運用では見え方が変わりうる
+- R-005: `swap-window` 成功後に visible window 名を戻さないと、wrapper 再起動時に `dashboard` window が増殖する
 
 ## 受け入れ条件（観測可能な振る舞い） (必須)
 - AC-001:
@@ -185,6 +186,13 @@
   - Then: `dashboard` target の window-local option は `window-size latest` に収束し、外側 Terminal の resize 後に `dashboard:0` の `window_width` と pane 幅/高さが追随して変化する
   - 観測点（UI/HTTP/DB/Log など）: `tmux show-options -t dashboard:0 -w`, `tmux display-message -p -t dashboard:0 '#{window_width} #{window_height}'`, `tmux list-panes -t dashboard:0 ...`, E2E / 手動テスト
   - 権限/認可条件（ある場合）: 該当なし
+- AC-009:
+  - Actor/Role: 開発者
+  - Given: wrapper 実行や `swap-window` 後に `dashboard` session 内へ visible window の重複や staging 由来の既定名 window が残りうる
+  - When: `./tmux-dashboard` を起動する、または orchestrator が新レイアウトを昇格させる
+  - Then: `dashboard` session 内の tool-managed window は visible window `dashboard` と runner window `__tmux_dashboard_runner__` のみへ収束し、runner は canonical visible target のみを追う
+  - 観測点（UI/HTTP/DB/Log など）: `tmux list-windows -t dashboard -F '#{window_index}|#{window_name}|#{window_active}'`, runner `pane_start_command`, wrapper / E2E / 手動テスト
+  - 権限/認可条件（ある場合）: 該当なし
 
 ### 入力→出力例 (任意)
 - EX-001:
@@ -235,6 +243,10 @@
   - 条件: `dashboard` session に複数 client が attached している
   - 期待: 既定 policy は `latest` とし、最後に active になった client 基準で resize 追随する。少なくとも `manual` 固定による追随停止は起きない
   - 観測点: `tmux list-clients -t dashboard`, `tmux show-options -t dashboard:0 -w`, 手動テスト
+- EC-011:
+  - 条件: visible dashboard window が `dashboard` 名を失ったまま、`python3.12` などの既定名 window が複数残っている
+  - 期待: wrapper 起動時に canonical visible window を 1 枚だけ選び直して `dashboard` へ rename し、余剰 non-runner window を cleanup する
+  - 観測点: `tmux list-windows -t dashboard -F '#{window_index}|#{window_name}|#{window_active}'`, wrapper runtime テスト, 手動確認
 
 ## 用語（ドメイン語彙） (必須)
 - TERM-001: headless = tmux client が付いていない detached 実行状態
@@ -243,6 +255,7 @@
 - TERM-004: phantom target = tmux に実在しないのに driver が返してしまう window target
 - TERM-005: ghost residual target = create failure 後に retry queue へ誤記録された、tmux 上に実在しない cleanup target
 - TERM-006: window-size policy = tmux が window の有効サイズを決める window-local option。今回の既定は `latest` を採用する
+- TERM-007: canonical visible window = wrapper / runner が監視対象として扱う唯一の visible dashboard window
 
 ## 未確定事項（TBD / 要確認） (必須)
 - 該当なし
