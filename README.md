@@ -64,6 +64,9 @@ make install
 > - `make install` creates a symlink to this repository's `./tmux-dashboard` script.
 >   If you move or delete the repository, the `tmux-dashboard` command will break — re-run `make install`.
 > - On Apple Silicon Homebrew, you may want `make install PREFIX=/opt/homebrew` (or `PREFIX="$(brew --prefix)"`).
+> - Runtime does not call `uv`; the wrapper launches the repo-local `.venv/bin/python` directly.
+> - If `uv` cache access is restricted on your machine, use a safe local cache during setup:
+>   `UV_CACHE_DIR="$(pwd)/.tmp/uv-cache" uv sync --locked`
 
 ## Quick Start
 
@@ -85,6 +88,11 @@ tmux-dashboard
 Alternatively, run directly via uv:
 ```bash
 uv run python -m tmux_dashboard
+```
+
+Or run directly via the repo virtualenv:
+```bash
+.venv/bin/python -m tmux_dashboard
 ```
 
 The dashboard will:
@@ -205,6 +213,26 @@ uv run python -m tmux_dashboard --window-target dashboard:1
 - Ensure you have other tmux sessions running
 - Check exclude patterns in your configuration
 - Verify: `tmux list-sessions`
+
+### Wrapper exits before attach
+- Run `make doctor` first. It now checks `.venv` import health, not just binary presence.
+- If you see `broken virtualenv`, rebuild the environment:
+```bash
+rm -rf .venv
+UV_CACHE_DIR="$(pwd)/.tmp/uv-cache" uv sync --locked
+```
+- If the wrapper reports `runner bootstrap failed before attach`, inspect the runner pane output shown on stderr and retry with:
+```bash
+.venv/bin/python -m tmux_dashboard --window-target dashboard:0 --once --iterations 1
+```
+
+### `uv` works in one environment but not on this machine
+- Some local setups point `uv` cache to a protected or external volume.
+- Check whether `uv run ...` fails with an `Operation not permitted` error under a cache path such as `/Volumes/.../.cache/uv`.
+- If so, use a writable local cache for setup and repair commands:
+```bash
+UV_CACHE_DIR="$(pwd)/.tmp/uv-cache" uv sync --locked
+```
 
 ### High CPU usage
 - Increase `poll_interval_sec` (e.g., to 5 seconds)

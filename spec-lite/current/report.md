@@ -1073,3 +1073,123 @@ uv run pytest -q
 
 ## 省略/例外メモ (必須)
 - 該当なし
+
+---
+
+## 2026-03-31 live wrapper 表示不良の現物調査
+
+### 概要
+- ユーザー実機で `dashboard`, `hoge`, `kkk` session が存在する状態で `./tmux-dashboard` が正しく表示されない件を現物調査した。
+- 結果として、表示不良は「レイアウト不良」単体ではなく、「依存欠落で新しい runner が起動できない状態」と「古い runner が残留して dashboard を再適用し続ける状態」の複合障害だった。
+
+### 実施内容
+- `tmux list-windows` / `tmux list-panes` で、`dashboard:0` が plain shell 1 pane のままであることを確認した。
+- `./tmux-dashboard` を direct に実行し、非 TTY では `open terminal failed: not a terminal` で終わる一方、その前段で runner 起動処理までは進んでいることを確認した。
+- `uv run --no-sync python -m tmux_dashboard --window-target dashboard:0 --once --iterations 1` を直接実行し、`ModuleNotFoundError: No module named 'yaml'` で新しい runner が即死していることを確認した。
+- `uv sync --locked` で依存を同期し、direct runner が `hoge`, `kkk` を検出して renderer を spawn できるところまで復旧させた。
+- `ps` と `tmux-dashboard.log` を確認し、別系統の古い常駐 runner が `alpha`, `beta`, `gamma` を継続適用しており、新しい表示を直後に上書きしていることを確認した。
+- 調査結果を `spec-lite/current/discussions/live-wrapper-misdisplay-analysis-20260331.md` に整理した。
+
+### 実行コマンド / 結果
+```bash
+tmux list-windows -t dashboard -F '#{window_index}|#{window_name}|#{window_active}|#{window_width}x#{window_height}'
+tmux list-panes -t dashboard:0 -F '#{pane_index}|#{pane_title}|#{pane_width}x#{pane_height}|#{pane_current_command}'
+cd /srv/mount/tmux-dashboard && ./tmux-dashboard
+cd /srv/mount/tmux-dashboard && uv run --no-sync python -m tmux_dashboard --window-target dashboard:0 --once --iterations 1
+cd /srv/mount/tmux-dashboard && uv sync --locked
+ps -ef | rg 'tmux_dashboard|uv run --no-sync python -m tmux_dashboard'
+tail -n 200 ~/.local/state/tmux-dashboard/tmux-dashboard.log
+
+# 主要結果:
+# - 初回 direct runner は ModuleNotFoundError: yaml
+# - uv sync 後は direct runner 起動成功
+# - ただし 17:29 開始の古い常駐 runner が alpha/beta/gamma を再適用し続けていた
+```
+
+### 変更したファイル
+- `spec-lite/current/discussions/live-wrapper-misdisplay-analysis-20260331.md`
+- `spec-lite/current/report.md`
+
+### コミット
+- 該当なし
+
+### 判断
+- いまの実機障害の主因は、最新のレイアウト修正そのものではない。
+- 一次原因は依存同期崩れ、二次原因は stale runner 干渉である。
+- 今後の修正論点は「critical import preflight」と「同一 target 管理 runner の重複検知」に整理できる。
+
+### 追加証跡
+```bash
+ps -ef | grep 'tmux_dashboard --window-target dashboard:0' | grep -v grep
+tmux list-panes -t dashboard:0 -F '#{pane_index}|#{pane_title}|#{pane_width}x#{pane_height}|#{pane_current_command}'
+cd /srv/mount/tmux-dashboard && uv run --no-sync python -c 'import yaml'
+
+# ユーザー実機結果:
+# - 17:29 開始の stale runner が 1 系統残存
+# - dashboard:0 はなお plain shell 1 pane
+# - その後 stale runner は消えたが、yaml import は依然失敗
+# - `uv sync --locked` の Checked だけでは broken `.venv` が直っていない
+```
+
+### 復旧実施
+```bash
+cd /srv/mount/tmux-dashboard
+rm -rf .venv
+uv sync --locked
+uv run --no-sync python -c 'import yaml; print("ok")'
+uv run --no-sync python -m tmux_dashboard --window-target dashboard:0 --once --iterations 1
+tmux list-panes -t dashboard:0 -F '#{pane_index}|#{pane_title}|#{pane_width}x#{pane_height}|#{pane_current_command}'
+tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_attached}'
+
+# 結果:
+# - yaml import は ok
+# - direct runner は 0 で完走
+# - dashboard:0 は shell から dashboard 表示へ遷移
+# - 最終状態は 0|hhh|122x4|python3
+# - 非 dashboard session はこの時点で hhh のみ
+```
+
+---
+
+## 2026-04-01 local runtime hardening 実装
+
+### 概要
+- ローカル環境で `uv` cache / `.venv` 崩壊により wrapper が runner を即死させる問題に対し、runtime hardening を実装した。
+- 方針は「runtime で `uv` を使わない」「`.venv` import health を attach 前に fail-fast」「runner pane の即死を明示診断する」の 3 点に固定した。
+
+### 実施内容
+- `tmux-dashboard` wrapper を `uv run --no-sync ...` から `.venv/bin/python -m tmux_dashboard ...` 起動へ変更した。
+- wrapper 起動前に `import yaml, libtmux, tmux_dashboard` を実行し、broken `.venv` なら attach 前に停止して修復手順を出すようにした。
+- runner window を空で作成してから `respawn-pane` で起動する方式へ変え、`remain-on-exit on` と短い grace period 後の `pane_dead` 確認で bootstrap failure を検出できるようにした。
+- `Makefile` の `doctor` に `.venv` import health check を追加し、存在だけでなく runtime 健全性を判定するようにした。
+- `README.md` に runtime が `.venv/bin/python` 前提であること、`UV_CACHE_DIR` を使った復旧手順、`broken virtualenv` / `runner bootstrap failed before attach` の対処を追加した。
+- wrapper 用の subprocess テスト `tests/test_wrapper_runtime.py` を追加し、broken `.venv` の fail-fast、runner 即死検知、正常起動を固定した。
+
+### 実行コマンド / 結果
+```bash
+bash -n tmux-dashboard
+.venv/bin/python -m pytest tests/test_wrapper_runtime.py tests/test_wrapper_help.py -q
+make doctor
+.venv/bin/python -m pytest tests/test_e2e_tmux.py -q -k 'wrapper_path_builds_layout_and_runner_window or wrapper_path_zero_sessions_clear_stale_title or wrapper_recovers_manual_and_follows_resize'
+
+# 結果:
+# - shell syntax check は成功
+# - wrapper 関連テストは 4 passed
+# - make doctor は runtime import health を含めて All checks passed.
+# - wrapper E2E 3 件はこの環境で skip（tmux usable 判定により未実行）
+```
+
+### 変更したファイル
+- `tmux-dashboard`
+- `Makefile`
+- `README.md`
+- `tests/test_wrapper_runtime.py`
+- `spec-lite/current/report.md`
+
+### コミット
+- 未実施（ユーザーがレビュー / コミットを担当するため）
+
+### 判断
+- ベストプラクティスは「setup に `uv`、runtime に `.venv/bin/python`」である。
+- runtime で `uv` cache や editable 解決に再依存すると、ローカル固有 cache path / 権限差分を毎回踏むため不安定になる。
+- broken `.venv` は attach 後ではなく attach 前に止める方が障害切り分けコストを最小化できる。
