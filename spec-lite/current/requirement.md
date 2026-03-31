@@ -2,7 +2,7 @@
 種別: 要件定義書
 機能ID: "fix-tmux-headless-layout"
 機能名: "headless tmux でのレイアウト復旧"
-関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331"]
+関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331", "window-size manual resize follow-up analysis 20260331"]
 状態: "draft"
 作成者: "codex"
 最終更新: "2026-03-31"
@@ -14,6 +14,7 @@
 - `tmux-dashboard` を detached / headless な tmux 環境でも安定して起動できるようにし、複数セッションを期待どおりタイル表示できる状態へ戻す。
 - `./tmux-dashboard` wrapper 経由でも direct runner と同じ復旧品質で動作し、runner window を含む運用でも破綻しない状態にする。
 - レイアウト再構成に失敗した場合でも dashboard を壊したまま放置せず、原因を観測できる形で縮退または回復できるようにする。
+- 外側 Terminal の resize に対して `dashboard` window 自体が追随し、内側 pane レイアウトも自然に再計算される状態へ戻す。
 
 ## 背景・現状（As-Is / 調査メモ） (必須)
 - 現状の挙動（事実）:
@@ -28,11 +29,14 @@
   - `run_once()` は pane 数不足でも `zip()` で黙って一部セッションだけ描画できてしまう。
   - `check_pane_integrity()` はタイトル設定前に走るため、初回に誤警告を出しやすい。
   - direct runner の既存 E2E は `tmux new-session -d -s dashboard` を使っており、初期 window 名が `zsh` のため wrapper 固有の同名条件を再現していなかった。
+  - ユーザー実機では `dashboard` target の tmux window option が `window-size manual` になっており、外側 Terminal を広げても `dashboard:0` の `window_width` が追随しない。
+  - ユーザー実機では `dashboard` session に複数 client が attached しており、`window-size manual` の固定が右側 unused space の視覚症状として顕在化している。
 - 現状の課題（困っていること）:
   - headless 実行時に dashboard が期待どおり複数 pane を作れず、ツールの主要価値を失っている。
   - レイアウト失敗が可視化されにくく、障害調査が難しい。
   - テストが `xfail` に依存しており、実環境での正常性保証が弱い。
   - wrapper 経路だけ direct runner と異なる壊れ方をし、利用者にとって最も自然な入口が信用できない。
+  - `dashboard` target が `window-size manual` のまま残ると、pane 数や列数は正しくても「外側 Terminal を広げても dashboard が追随しない」状態が再発する。
 - 再現手順（最小で）:
   1) `TERM=screen-256color tmux new-session -d -x 120 -y 40 -s dashboard 'sh -lc "sleep 300"'`
   2) `tmux split-window -h -p 50 -t dashboard:0`
@@ -54,6 +58,9 @@
 - 情報源（ヒアリング/調査の根拠）:
   - ドキュメント: `@spec-lite/current/discussions/tmux-split-window-headless-analysis.md`
   - ドキュメント: `@spec-lite/current/discussions/wrapper-create-window-root-cause-20260331.md`
+  - ドキュメント: `@spec-lite/current/discussions/resize-follow-up-analysis-20260331.md`
+  - ドキュメント: `@spec-lite/current/discussions/window-size-manual-remediation-options-20260331.md`
+  - ドキュメント: `@spec-lite/current/discussions/window-size-latest-switch-guide-20260331.md`
   - コード: `tmux_dashboard/tmuxio.py`（`CliDriver.split_window`, `CliDriver.split_pane`, `LibtmuxDriver.split_window`, `LibtmuxDriver.split_pane`）
   - コード: `tmux_dashboard/tmuxio.py`（`CliDriver.create_window`, `LibtmuxDriver.create_window`）
   - コード: `tmux_dashboard/orchestrator.py`（`apply_layout`, `check_pane_integrity`, `run_once`）
@@ -80,6 +87,8 @@
   - `swap-window` / `kill-window` failure も driver 層で fail-closed に扱う
   - 0 セッション収束後に stale pane title を残さない
   - create failure 後に ghost residual target を retry queue に残さない
+  - `dashboard` target の `window-size` を `latest` として管理し、outer Terminal resize に追随できる状態を維持する
+  - 既存 `manual` 汚染が残る session でも、起動時または runner preflight で自動回復できるようにする
 - MUST NOT（絶対にやらない／追加しない）:
   - 利用者に tmux attach 必須の運用を強制しない
   - dashboard 以外のセッション設定やグローバル tmux 設定を変更しない
@@ -94,6 +103,7 @@
 - Python 3.10+ / tmux 3.2+ 前提を維持する
 - 依存ライブラリは原則追加しない
 - dashboard 以外のセッションへ侵襲的変更を加えない
+- `dashboard` 管理 window に対する window-local option 変更に限定し、global tmux option は変更しない
 - 既存 CLI (`python -m tmux_dashboard`, `--once`, `--iterations`, `--window-target`) の互換を壊さない
 - TDD で進め、最終的に `uv run pytest -q` をグリーンにする
 
@@ -103,6 +113,7 @@
 - 調査レポートに記録した実測結果を本件の As-Is として扱う
 - `-l` の既定は absolute-cell 指定とし、算出長が 0 以下になる場合のみ `%` 指定へ fallback する
 - tmux の `new-window` で target index を指定したい場合は `session:window_index` を渡す必要がある
+- 今回の要件では「いま使っている Terminal の resize に追随する」挙動が優先であり、multi-client 時の既定 policy は `latest` が最も要件に近い
 
 ## 判断材料/トレードオフ（Decision / Trade-offs） (任意)
 - 論点: `-p` 維持か `-l` への変更か
@@ -115,6 +126,7 @@
 - R-001: `-l` への変更で端数配分ロジックが既存期待とずれる
 - R-002: tmux バージョン差で `-l 50%` の解釈差がある可能性
 - R-003: 既存 E2E の `xfail` を縮小する際、環境依存でテストが不安定になる可能性
+- R-004: `window-size latest` は最後に active になった client に寄るため、同じ `dashboard` session を複数 client で同時監視する運用では見え方が変わりうる
 
 ## 受け入れ条件（観測可能な振る舞い） (必須)
 - AC-001:
@@ -166,6 +178,13 @@
   - Then: `dashboard:0` は単一 pane を維持しつつ、pane title は空または 0 セッション用の中立値に更新され、削除済みセッション名を表示しない
   - 観測点（UI/HTTP/DB/Log など）: `tmux list-panes -t dashboard:0 -F '#{pane_index}|#{pane_title}'`, orchestrator テスト
   - 権限/認可条件（ある場合）: 該当なし
+- AC-008:
+  - Actor/Role: 開発者
+  - Given: `dashboard` target が既存 session として残っており、tmux window option が `window-size manual` または `latest` 以外になっている
+  - When: wrapper 起動または runner の通常サイクルが `dashboard` target を扱う
+  - Then: `dashboard` target の window-local option は `window-size latest` に収束し、外側 Terminal の resize 後に `dashboard:0` の `window_width` と pane 幅/高さが追随して変化する
+  - 観測点（UI/HTTP/DB/Log など）: `tmux show-options -t dashboard:0 -w`, `tmux display-message -p -t dashboard:0 '#{window_width} #{window_height}'`, `tmux list-panes -t dashboard:0 ...`, E2E / 手動テスト
+  - 権限/認可条件（ある場合）: 該当なし
 
 ### 入力→出力例 (任意)
 - EX-001:
@@ -208,6 +227,14 @@
   - 条件: `create_window()` が window 未作成のまま失敗し、その予測 staging target が tmux 上に存在しない
   - 期待: orchestrator はその missing target を residual cleanup queue に積まず、後続サイクルの retry を ghost target で塞がない
   - 観測点: orchestrator テスト、warning ログ、residual queue 状態
+- EC-009:
+  - 条件: 既存の `dashboard` target が `window-size manual` のまま残っている
+  - 期待: wrapper 起動時または runner preflight で `window-size latest` へ自動回復し、利用者に `kill-session` を要求しない
+  - 観測点: `tmux show-options -t dashboard:0 -w`, wrapper / runner テスト
+- EC-010:
+  - 条件: `dashboard` session に複数 client が attached している
+  - 期待: 既定 policy は `latest` とし、最後に active になった client 基準で resize 追随する。少なくとも `manual` 固定による追随停止は起きない
+  - 観測点: `tmux list-clients -t dashboard`, `tmux show-options -t dashboard:0 -w`, 手動テスト
 
 ## 用語（ドメイン語彙） (必須)
 - TERM-001: headless = tmux client が付いていない detached 実行状態
@@ -215,6 +242,7 @@
 - TERM-003: 分割戦略 = `split-window` / `split-pane` に渡すサイズ指定方式とその配分ロジック
 - TERM-004: phantom target = tmux に実在しないのに driver が返してしまう window target
 - TERM-005: ghost residual target = create failure 後に retry queue へ誤記録された、tmux 上に実在しない cleanup target
+- TERM-006: window-size policy = tmux が window の有効サイズを決める window-local option。今回の既定は `latest` を採用する
 
 ## 未確定事項（TBD / 要確認） (必須)
 - 該当なし
@@ -223,7 +251,7 @@
 - すべてのAC/ECが満たされる
 - 未確定事項が解消される、または暫定合意が `design.md` / `plan.md` に反映される
 - MUST NOT / OUT OF SCOPE を破っていない
-- `uv run pytest -q` がグリーンで、headless 分割と wrapper 経路の回帰を再現するテストが追加されている
+- `uv run pytest -q` がグリーンで、headless 分割、wrapper 経路、`window-size latest` 収束と resize 追随の回帰を再現するテストが追加されている
 
 ## 省略/例外メモ (必須)
 - 該当なし

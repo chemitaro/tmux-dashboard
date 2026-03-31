@@ -2,7 +2,7 @@
 種別: 設計書
 機能ID: "fix-tmux-headless-layout"
 機能名: "headless tmux でのレイアウト復旧"
-関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331"]
+関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331", "window-size manual resize follow-up analysis 20260331"]
 状態: "draft"
 作成者: "codex"
 最終更新: "2026-03-31"
@@ -23,6 +23,7 @@
   - `swap-window` / `kill-window` failure を default driver でも fail-closed に扱う
   - create failure 後に ghost residual target を残さない
   - 0 セッション収束後の pane title を stale session 名のまま残さない
+  - `dashboard` target の `window-size` を `latest` として管理し、outer Terminal resize に追随できる状態を維持する
 - MUST NOT:
   - attach 必須運用へ仕様変更しない
   - dashboard 以外の tmux 設定へ侵襲しない
@@ -35,6 +36,8 @@
   - `-l` ベース分割は headless 実測で成功している
   - `@spec-lite/current/discussions/tmux-split-window-headless-analysis.md` を As-Is の根拠とする
   - `@spec-lite/current/discussions/wrapper-create-window-root-cause-20260331.md` の raw tmux 実験を wrapper 経路の一次原因根拠とする
+  - `@spec-lite/current/discussions/resize-follow-up-analysis-20260331.md` の `window-size manual` 実測を resize 追随不良の一次原因根拠とする
+  - `@spec-lite/current/discussions/window-size-manual-remediation-options-20260331.md` の比較結果をもとに `latest` を既定方針として採用する
 
 ---
 
@@ -61,6 +64,7 @@
   - `check_pane_integrity()` は `apply_titles()` 前に呼ばれる
   - 0 セッション short-circuit は pane 数を 1 つに戻すが、pane title は直前セッション名のまま残り得る
   - create failure path は存在しない staging target でも cleanup / residual 登録を試みる
+  - wrapper / runner は `dashboard` target の `window-size` を管理しておらず、既存 session に残った `manual` を自動回復しない
 - 採用するパターン（命名/責務/例外/DI/テストなど）:
   - driver abstraction は維持し、CLI/libtmux の両方に同じ契約を適用する
   - orchestrator は高レベル判断、tmuxio は tmux コマンド差分吸収に責務を分離する
@@ -107,6 +111,12 @@
   2) orchestrator は予測 staging target の実在有無を確認する
   3) 実在しない target には cleanup / residual 登録を行わない
   4) 既存 dashboard を保持したまま error log を残して次サイクルへ戻る
+- Flow for AC-008 / EC-009 / EC-010:
+  1) wrapper または runner preflight が対象 `dashboard` window target を確定する
+  2) tmuxio が当該 target の `window-size` を取得する
+  3) `latest` 以外なら `set-window-option -w window-size latest` を実行する
+  4) その後に `window_size()` を取得し、通常の layout 計算へ進む
+  5) outer Terminal resize 後の次サイクルで `window_width` / `window_height` が更新され、pane 配置再計算に反映される
 
 ## データ・バリデーション（必要最小限） (任意)
 - MODEL-001: `SplitLength`
@@ -115,6 +125,9 @@
 - MODEL-002: `LayoutApplyResult`
   - Fields: `success`, `pane_ids`, `error_message`, `warning_message`, `residual_window_target`
   - Constraints/Validation: 失敗時は `error_message` 必須。swap 後 cleanup 失敗の成功系では `success=True`, `warning_message` 必須, `residual_window_target` に残置した旧 window target を入れる
+- MODEL-003: `WindowOptionState`
+  - Fields: `window_target`, `window_size_policy`
+  - Constraints/Validation: `window_size_policy` は tmux が返す文字列。dashboard 管理 target では `latest` を不変条件とする
 
 ## 判断材料/トレードオフ（Decision / Trade-offs） (任意)
 - 論点: `-p` 維持か `-l` 切替か
@@ -142,6 +155,17 @@
   - 選択肢B: `create_window()` の tmux target 指定と失敗検知を修正して根治する
   - 決定: B
   - 理由: visible window 名を変えずに direct runner / wrapper の経路差をなくし、driver 契約としても正しくなるため
+- 論点: resize 追随不良をどう解消するか
+  - 選択肢A: `window-size smallest`
+  - 選択肢B: `window-size latest`
+  - 選択肢C: `manual` のまま `resize-window` をアプリ側で都度実行する
+  - 決定: B
+  - 理由: 「いま使っている Terminal の resize に追随する」という要件に最も近く、tmux 標準 policy を使えて、既存 `manual` 汚染も自動回復しやすいため
+- 論点: `window-size latest` をいつ保証するか
+  - 選択肢A: wrapper 起動時だけ設定する
+  - 選択肢B: wrapper 起動時に設定し、runner preflight でも drift を是正する
+  - 決定: B
+  - 理由: 既存 session の再利用、利用者操作、別クライアントからの変更で `manual` が残っても自己回復できるため
 
 ## インターフェース契約（ここで固定） (任意)
 ### 関数・クラス境界（重要なものだけ）
@@ -186,6 +210,18 @@
   - Input: CLI 引数
   - Output: exit code
   - Errors/Exceptions: `--once` と通常ループのどちらでも個別サイクル失敗はログ化して継続 / exit 0 とし、KeyboardInterrupt のみ正常終了扱いで 0 を返す
+- IF-009: `TmuxIO.get_window_option(window_target: str, option_name: str) -> str`
+  - Input: window target, option 名
+  - Output: option 値文字列
+  - Errors/Exceptions: tmux / libtmux から値を取得できない場合は driver 例外
+- IF-010: `TmuxIO.set_window_option(window_target: str, option_name: str, option_value: str) -> None`
+  - Input: window target, option 名, option 値
+  - Output: なし
+  - Errors/Exceptions: tmux / libtmux の option 更新失敗は driver 例外
+- IF-011: `Orchestrator.ensure_dashboard_window_policy(window_target: str) -> None`
+  - Input: dashboard 管理対象 window target
+  - Output: なし
+  - Errors/Exceptions: `window-size` 取得または設定に失敗した場合は明示ログを残しつつ `run_once()` 側で捕捉できる例外。成功時は `window-size latest` を invariant とする
 
 ## 変更計画（ファイルパス単位） (必須)
 - 追加（Add）:
@@ -194,10 +230,10 @@
   - `tmux_dashboard/layout.py`: absolute-cell 既定 / `%` fallback の `-l` ベース分割長算出関数を追加し、percent split 前提を更新
   - `tmux_dashboard/tmuxio.py`: split API を `length` 指定へ変更し、CLI/libtmux 両方で `-l` を使う。追加で `create_window()` の target 指定と失敗検知を修正する
   - `tmux_dashboard/orchestrator.py`: staging window ベースの非破壊レイアウト適用、失敗結果処理、integrity チェック順序、mapping 検証を修正し、staging 作成失敗を explicit に扱う。追加で ghost residual target 回避と 0 セッション時 title クリアを実装する
-  - `tmux-dashboard`: 原則 read-only。wrapper actual-path E2E の再現前提として現行 session/window/runner 構成を維持し、今回の追加修正では変更対象にしない
-  - `tests/test_tmuxio.py`: split 呼び出しの期待値を `-l` ベースへ更新し、`create_window()` の契約を追加検証する
+  - `tmux-dashboard`: visible dashboard window 確定後に `window-size latest` を保証する preflight を追加する
+  - `tests/test_tmuxio.py`: split 呼び出しの期待値を `-l` ベースへ更新し、`create_window()` の契約と window option 取得/設定の契約を追加検証する
   - `tests/test_orchestrator.py`: apply_layout の非破壊性、pane 数不足、integrity 順序、staging 作成失敗のテストを追加
-  - `tests/test_e2e_tmux.py`: headless 条件で `-l` 経路が通ることに加え、wrapper と同じ session/window 同名条件を検証するケースを追加する
+  - `tests/test_e2e_tmux.py`: headless 条件で `-l` 経路が通ることに加え、wrapper と同じ session/window 同名条件、`window-size latest` 収束と resize 追随を検証するケースを追加する
   - `spec-lite/current/report.md`: 実装ログを追記
 - 削除（Delete）:
   - 該当なし
@@ -238,13 +274,20 @@
   - 初回起動直後の既定 title は異常扱いしない
 - wrapper 経路:
   - visible window 名 `dashboard` は維持する
-  - 修正対象は wrapper 命名ではなく driver 契約と orchestrator の失敗ハンドリングに限定する
+  - visible dashboard window 確定後に wrapper が `set-window-option -t "$dashboard_window_target" window-size latest` を実行する
+  - これにより既存 `manual` 汚染が残る session でも起動時点で自動回復する
+- window-size policy 管理:
+  - dashboard 管理対象 window に対してのみ `window-size latest` を保証する
+  - wrapper 起動時に 1 回、runner `run_once()` 前の preflight で毎サイクル再確認する
+  - `get_window_option(window_target, "window-size")` が `latest` 以外を返したら `set_window_option(window_target, "window-size", "latest")` を実行する
+  - option 更新失敗は明示ログとして観測し、既存 `dashboard:0` を壊さない fail-closed 方針を維持する
 - failure observability:
   - driver failure は unit test で例外を観測する
   - `run_once()` failure は dashboard 不変と明示ログで観測する
   - `run_once()` cleanup warning は新 `dashboard:0` 維持 + warning ログ + 残置 window target で観測する
   - CLI failure は `--once` / 通常ループとも exit 0 を維持しつつログで観測する
   - 0 セッション short-circuit は pane 数 1 と pane title 空文字を UI 観測点として固定する
+  - `window-size latest` 保証は `tmux show-options -t dashboard:0 -w` と resize 後の `display-message` / `list-panes` で観測する
 - log contract:
   - create/split/pane-shortage/swap 前 failure は `ERROR` とし、少なくとも `window_target`, `staging_target`（存在する場合）, 根本エラー文字列を含める
   - cleanup warning は `WARNING` とし、少なくとも `window_target`, `residual_window_target`, 根本エラー文字列を含める
@@ -258,6 +301,7 @@
 - AC-005 → IF-006, `tmux-dashboard`, `tmux_dashboard/tmuxio.py`, `tests/test_e2e_tmux.py`
 - AC-006 → IF-006, IF-006a, IF-006b, `tmux_dashboard/tmuxio.py`, `tmux_dashboard/orchestrator.py`, `tests/test_tmuxio.py`, `tests/test_orchestrator.py`
 - AC-007 → IF-007, `tmux_dashboard/orchestrator.py`, `tests/test_orchestrator.py`, `tests/test_e2e_tmux.py`
+- AC-008 → IF-009, IF-010, IF-011, `tmux-dashboard`, `tmux_dashboard/orchestrator.py`, `tmux_dashboard/tmuxio.py`, `tests/test_tmuxio.py`, `tests/test_e2e_tmux.py`
 - EC-001 → `tmux_dashboard/orchestrator.py`, `tests/test_orchestrator.py`
 - EC-002 → IF-004, IF-005, `tests/test_orchestrator.py`, `tests/test_e2e_tmux.py`
 - EC-003 → `tmux_dashboard/orchestrator.py`, `tests/test_pane_integrity.py`
@@ -266,6 +310,8 @@
 - EC-006 → IF-006, `tmux_dashboard/tmuxio.py`, `tmux_dashboard/orchestrator.py`, `tests/test_tmuxio.py`, `tests/test_orchestrator.py`
 - EC-007 → `tmux_dashboard/orchestrator.py`, `tests/test_orchestrator.py`
 - EC-008 → IF-006, IF-007, `tmux_dashboard/orchestrator.py`, `tests/test_orchestrator.py`
+- EC-009 → IF-009, IF-010, IF-011, `tmux-dashboard`, `tmux_dashboard/orchestrator.py`, `tests/test_e2e_tmux.py`
+- EC-010 → IF-011, `tmux-dashboard`, `tmux_dashboard/orchestrator.py`, `tests/test_e2e_tmux.py`, 手動テスト
 - 非交渉制約 → 依存追加なし、CLI 互換維持、TDD を plan / tests で担保
 
 ## テスト戦略（最低限ここまで具体化） (任意)
@@ -280,10 +326,14 @@
     - `tests/test_tmuxio.py`: libtmux `swap_window()` / `kill_window()` が tmux failure を例外化する
     - `tests/test_orchestrator.py`: create failure で missing staging target を residual queue に積まない
     - `tests/test_orchestrator.py`: 0 セッション時に pane title が空文字へクリアされる
+    - `tests/test_tmuxio.py`: window option の取得/設定が CLI / libtmux の両 driver で契約どおり動く
+    - `tests/test_orchestrator.py`: preflight が `window-size manual` を検出したとき `latest` へ是正する
   - Integration:
     - `tests/test_e2e_tmux.py`: headless で `-l` ベース分割により pane が増えること
     - `tests/test_e2e_tmux.py`: wrapper と同じ `session/window same-name` 条件でも direct runner と wrapper の両方が通ること
     - `tests/test_e2e_tmux.py`: wrapper 起動後に全対象セッションを削除すると `dashboard:0` が 1 pane かつ空 title へ収束すること
+    - `tests/test_e2e_tmux.py`: `window-size manual` の既存 dashboard を wrapper/direct runner が `latest` へ自動回復すること
+    - `tests/test_e2e_tmux.py`: outer Terminal 相当の `resize-window` 後に `dashboard:0` の `window_width` と pane 幅が追随すること
   - Frontend: 該当なし
 - どのAC/ECをどのテストで保証するか:
   - AC-001 → `tests/test_tmuxio.py`, `tests/test_e2e_tmux.py`
@@ -294,6 +344,7 @@
   - AC-005 → `tests/test_e2e_tmux.py`
   - AC-006 → `tests/test_tmuxio.py`, `tests/test_orchestrator.py`
   - AC-007 → `tests/test_orchestrator.py`, `tests/test_e2e_tmux.py`
+  - AC-008 → `tests/test_tmuxio.py`, `tests/test_orchestrator.py`, `tests/test_e2e_tmux.py`
   - EC-001 → `tests/test_orchestrator.py`
   - EC-002 → `tests/test_orchestrator.py`, `tests/test_e2e_tmux.py`
   - EC-003 → `tests/test_pane_integrity.py`, `tests/test_orchestrator.py`
@@ -302,13 +353,15 @@
   - EC-006 → `tests/test_tmuxio.py`, `tests/test_orchestrator.py`
   - EC-007 → `tests/test_orchestrator.py`
   - EC-008 → `tests/test_orchestrator.py`
+  - EC-009 → `tests/test_orchestrator.py`, `tests/test_e2e_tmux.py`
+  - EC-010 → `tests/test_e2e_tmux.py`, 手動テスト
 - 非交渉制約（requirement.md）をどう検証するか:
   - 制約: 依存追加なし
     - 検証方法: `pyproject.toml` を変更しない
   - 制約: CLI 互換維持
     - 検証方法: 既存 CLI テストを回帰させない
   - 制約: グローバル tmux 設定非侵襲
-    - 検証方法: 既存 `set-option -w` 系テストを維持
+    - 検証方法: `window-size` は dashboard target の window-local option にのみ設定し、session/global option は変更しないことをテストとコードレビューで確認する
 - 実行コマンド（該当するものを記載）:
   - `uv run pytest -q`
   - 必要に応じて `uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_e2e_tmux.py -q`
