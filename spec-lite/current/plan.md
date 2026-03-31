@@ -2,7 +2,7 @@
 種別: 実装計画書
 機能ID: "fix-tmux-headless-layout"
 機能名: "headless tmux でのレイアウト復旧"
-関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331"]
+関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331", "window-size manual resize follow-up analysis 20260331"]
 状態: "draft"
 作成者: "codex"
 最終更新: "2026-03-31"
@@ -12,8 +12,8 @@
 # fix-tmux-headless-layout headless tmux でのレイアウト復旧 — 実装計画（TDD: Red → Green → Refactor）
 
 ## この計画で満たす要件ID (必須)
-- 対象AC: AC-001, AC-002, AC-003, AC-004, AC-005, AC-006, AC-007
-- 対象EC: EC-001, EC-002, EC-003, EC-004, EC-005, EC-006, EC-007, EC-008
+- 対象AC: AC-001, AC-002, AC-003, AC-004, AC-005, AC-006, AC-007, AC-008
+- 対象EC: EC-001, EC-002, EC-003, EC-004, EC-005, EC-006, EC-007, EC-008, EC-009, EC-010
 - 対象制約（該当があれば）:
   - 依存追加なし
   - CLI 互換維持
@@ -26,11 +26,13 @@
   - [x] S03: integrity 判定順序と E2E/回帰テストを整え、headless 復旧を保証する
   - [x] S04: wrapper 経路の `create_window` 根本原因を除去し、same-name 条件の回帰テストで固定する（code-complete。acceptance follow-up は S05）
   - [x] S05: 受け入れ検査の fail findings を解消し、default driver / 0 セッション収束の契約を完成させる
+  - [ ] S06: `window-size latest` を dashboard 管理契約として固定し、outer Terminal resize への追随を自動回復付きで保証する
 - historical / superseded steps（任意）:
   - [x] 旧 `planning/current/task.md` による `-p` ベース前提の実装計画（`@spec-lite/completed/20260330_1843_planning-migration/task.md` にアーカイブ済み）
 
 ## 現行の実行対象スコープ (任意)
 - S05: 完了。libtmux fail-closed の取りこぼし補完、ghost residual queue 防止、0 セッション stale title 解消、追加受け入れ回帰の自動化を実施済み
+- S06: 次の実行対象。`window-size manual` 汚染を `latest` へ自動回復し、wrapper / runner の両経路で resize 追随を保証する
 
 ## ネスト運用ルール (必須)
 - トップレベルステップ `Sxx` は「観測可能な成果」で分ける
@@ -47,6 +49,7 @@
   - AC-005 → S04
   - AC-006 → S04, S05
   - AC-007 → S05
+  - AC-008 → S06
   - EC-001 → S02, S05
   - EC-002 → S02, S03
   - EC-003 → S02
@@ -55,7 +58,9 @@
   - EC-006 → S04
   - EC-007 → S04, S05
   - EC-008 → S05
-  - 非交渉制約 → S01, S02, S03, S04, S05
+  - EC-009 → S06
+  - EC-010 → S06
+  - 非交渉制約 → S01, S02, S03, S04, S05, S06
 
 ## レビュー / QA ゲート方針 (必須)
 - G1:
@@ -398,6 +403,74 @@
 - [x] コミット境界を確定した（コミットしない場合は理由を記録した）
   - follow-up: `spec-lite/current/discussions/acceptance-review-wrapper-fix-20260331-s05-rereview.md` を authoritative な再判定記録として追加し、wrapper path の zero-session title cleanup E2E を補完した
 
+### S06 — `window-size latest` を管理契約として固定し、resize 追随を保証する (必須)
+- 対象: AC-008 / EC-009 / EC-010 / 制約: CLI 互換維持, dashboard 以外の tmux 設定非侵襲
+- 設計参照:
+  - 対象IF/API: IF-009, IF-010, IF-011
+- 対象テスト:
+    - `tests/test_tmuxio.py`
+    - `tests/test_orchestrator.py`
+    - `tests/test_e2e_tmux.py`
+- このステップで「追加しないこと（スコープ固定）」:
+  - `dashboard` 以外の session / global tmux option の変更
+  - 新規 CLI オプション追加
+  - pane 表示仕様やセッション選定仕様の変更
+
+#### update_plan（着手時に登録） (必須)
+- [ ] `update_plan` に、このステップの作業ブロックを登録した
+- 登録する作業ブロック:
+  - S06-B1: tmuxio window option API の Red/Green
+  - S06-B2: wrapper / orchestrator の `latest` 保証 Red/Green
+  - S06-B3: resize 追随 E2E と手動検証
+  - S06-B4: 品質ゲート / 報告 / コミット
+
+#### 期待する振る舞い（テストケース） (必須)
+- Given: 既存の `dashboard` target が `window-size manual` または `latest` 以外で残っている条件、または outer Terminal 相当のサイズ変更がある条件
+- When: wrapper または direct runner の 1 サイクル以上を実行する
+- Then: `dashboard` target は `window-size latest` へ収束し、以後の resize で `dashboard:0` の `window_width` と pane 幅/高さが追随して更新される
+- 観測点（UI/HTTP/DB/Log など）: `tmux show-options -t dashboard:0 -w`, `tmux display-message -p -t dashboard:0 '#{window_width} #{window_height}'`, `tmux list-panes -t dashboard:0 ...`, E2E テスト結果, 手動検証記録
+- 追加/更新するテスト:
+  - `tests/test_tmuxio.py`
+  - `tests/test_orchestrator.py`
+  - `tests/test_e2e_tmux.py`
+
+#### 作業ブロック（必須）
+- S06-B1: tmuxio window option API
+  - S06-B1-I1:
+    - Red: CLI / libtmux driver が window-local option の取得/設定契約を持たないことを示すテストを追加する
+    - Green: `get_window_option()` / `set_window_option()` を追加し、`window-size` の取得と更新を両 driver で扱えるようにする
+    - Refactor: tmux command helper を整理し、window option 系のエラーメッセージ契約を揃える
+- S06-B2: wrapper / orchestrator での `latest` 保証
+  - S06-B2-I1:
+    - Red: wrapper 起動時に `dashboard` target が `window-size manual` のまま残るテストを追加する
+    - Green: visible dashboard window 確定後に wrapper が `window-size latest` を設定する
+    - Refactor: wrapper 内の preflight 順序を整理し、既存 runner respawn 条件と干渉しない形にする
+  - S06-B2-I2:
+    - Red: runner preflight が `window-size manual` を検出しても回復しないテストを追加する
+    - Green: `run_once()` 前に `ensure_dashboard_window_policy(window_target)` を実行し、`latest` 以外なら是正する
+    - Refactor: option drift のログ方針を整理し、正常是正と失敗ログを分ける
+- S06-B3: resize 追随検証
+  - S06-B3-I1:
+    - Red: `window-size manual` の既存 dashboard が outer resize 後も `window_width` を更新しない E2E を追加する
+    - Green: `latest` 保証後に `display-message` と `list-panes` が追随を示すことを確認する
+    - Refactor: headless E2E と wrapper E2E のセットアップ重複を整理する
+  - S06-B3-I2:
+    - Red: 該当なし
+    - Green: 手動検証で `show-options`, `display-message`, `list-panes` を使って `latest` 収束と resize 追随を確認し、独立レポートへ記録する
+    - Refactor: 手動検証の再利用可能な確認コマンドを整理する
+- S06-B4: 品質ゲート / 報告 / コミット
+  - S06-B4-I1:
+    - Red: 該当なし
+    - Green: `uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_e2e_tmux.py -q` と `uv run pytest -q` を実行し、成功を確認する
+    - Refactor: `spec-lite/current/report.md` と手動検証レポートを更新し、レビュー境界とコミット境界を一致させる
+
+#### ステップ末尾（省略しない） (必須)
+- [ ] 期待するテストと必要な品質ゲートを実施し、成功した
+- [ ] 必要なレビュー / QA ゲートを通過した、または不要理由を記録した
+- [ ] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
+- [ ] `update_plan` を更新し、このステップの作業ブロックを完了にした
+- [ ] コミット境界を確定した（コミットしない場合は理由を記録した）
+
 ## 未確定事項（TBD） (必須)
 - 該当なし
 
@@ -406,6 +479,7 @@
 - `uv run pytest -q` がグリーンである
 - headless 回帰と wrapper same-name 回帰を再現するテストが追加され、今回の障害モードを自動検証できる
 - 現行スコープである S05 について、`acceptance-review-wrapper-fix-20260331.md` の 3 findings が再判定で closed と確認されている
+- 現行スコープが S06 の場合、`window-size latest` 収束と resize 追随の回帰テスト、および独立した手動検証レポートが記録されている
 - 必要なレビュー / QA ゲートを通過している
 - MUST NOT / OUT OF SCOPE を破っていない
 - `report.md` と plan の進捗が一致している

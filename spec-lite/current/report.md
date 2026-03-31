@@ -219,6 +219,277 @@ uv run pytest tests/test_layout.py tests/test_tmuxio.py -q
 # wrapper 経由で runner log に以下を確認:
 # non-destructive apply failed: pane shortage: tiles=0 sessions=3
 
+---
+
+### 2026-03-31 16:20 - 17:10
+
+#### 対象
+- Step: リサイズ追随不良の追加分析
+- AC/EC: 調査タスクのため該当なし
+
+#### 実施内容
+- ユーザー提供の `tmux list-sessions` / `tmux list-panes` / `tmux list-windows` / `tmux display-message` 出力を分析し、`dashboard:0` が実際に `dashboard` 以外の全 session を pane 化していることを確認した。
+- ユーザーから「dashboard 以外の全 session を表示する」は仕様であることを確認したため、session 数過多は主因候補から外した。
+- `configs/dashboard.yaml` の `min_tile_width: 65` を再確認し、幅 `191`・session 数 `3` では 2 列レイアウトが正しいことを整理した。
+- そのうえで、スクリーンショット `spec-lite/current/discussions/スクリーンショット 2026-03-31 16.39.34.png` を確認し、「外側 Terminal は広いのに内側 tmux window は狭いままで、右側がドット状の unused space になる」症状を確認した。
+- `dashboard|2|2` という実機出力と tmux の `window-size` / multi-client policy を照合し、現在の本命は「`dashboard` session に 2 client が attached しており、tmux が現在の visible client ではない別 client のサイズで window を維持している」ことだと判断した。
+- 調査結果を `spec-lite/current/discussions/resize-follow-up-analysis-20260331.md` に追記し、tmux wiki と man page を参考資料として追加した。
+
+#### 実行コマンド / 結果
+```bash
+sed -n '1,260p' spec-lite/current/discussions/resize-follow-up-analysis-20260331.md
+sed -n '1,220p' spec-lite/current/report.md
+
+# 既存の分析レポートと実装報告を確認し、追加分析を追記
+```
+
+#### 変更したファイル
+- `spec-lite/current/discussions/resize-follow-up-analysis-20260331.md` - スクリーンショットと multi-client window-size 仮説を追記
+- `spec-lite/current/report.md` - 今回の追加分析ログを追記
+
+#### コミット
+- 該当なし
+
+#### メモ
+- 次に本質原因を完全確定するには、ユーザー実機で `tmux show-options -t dashboard -w | rg 'window-size|aggressive-resize'` と `tmux list-clients -t dashboard -F '#{client_tty}|#{client_width}x#{client_height}|#{session_name}'` の取得が必要。
+
+---
+
+### 2026-03-31 17:10 - 17:20
+
+#### 対象
+- Step: リサイズ追随不良の原因確定
+- AC/EC: 調査タスクのため該当なし
+
+#### 実施内容
+- ユーザー実機から `window-size manual` と `dashboard` に attach している 2 client のサイズ情報を取得した。
+- `266x99` と `278x99` の client が attach しているにもかかわらず、`dashboard:0` の実効幅が以前の `191` のまま固定されていることから、client サイズ不足ではなく `manual` 固定が主因だと確定した。
+- これにより、「外側 Terminal を広げても中の dashboard window が追随しない」症状のクリティカルな本質原因を tmux 側の `window-size manual` と判断した。
+- 調査レポートを更新し、今後の修正論点として `window-size` の明示設定または `resize-window` の明示更新が必要であることを記録した。
+
+#### 実行コマンド / 結果
+```bash
+# ユーザー実機で取得された証跡
+tmux show-options -t dashboard -w | rg 'window-size|aggressive-resize'
+# => window-size manual
+
+tmux list-clients -t dashboard -F '#{client_tty}|#{client_width}x#{client_height}|#{session_name}'
+# => /dev/ttys019|266x99|dashboard
+# => /dev/ttys026|278x99|dashboard
+```
+
+#### 変更したファイル
+- `spec-lite/current/discussions/resize-follow-up-analysis-20260331.md` - `window-size manual` を根本原因として追記
+- `spec-lite/current/report.md` - 原因確定ログを追記
+
+#### コミット
+- 該当なし
+
+#### メモ
+- 次フェーズでは、manual 固定をどの責務で解消するかを requirement / design に落とし込む必要がある。
+
+---
+
+### 2026-03-31 17:20 - 17:35
+
+#### 対象
+- Step: `window-size manual` 解消策の比較整理
+- AC/EC: 調査タスクのため該当なし
+
+#### 実施内容
+- 原因確定済みの `window-size manual` を前提に、解決方法の比較とベストプラクティスを独立資料へ整理した。
+- 比較対象は `latest` / `smallest` / `largest` / `manual + resize-window` / 起動時のみ変更 / 毎ループ保証とした。
+- 評価の結果、最有力案は「wrapper / runner が `dashboard` target の `window-size` を `latest` に明示設定し、起動時だけでなく preflight でも保証し、既存 `manual` を自動移行する」方針だと整理した。
+- `smallest`、`manual + resize-window`、手動移行のみは非推奨として理由を明記した。
+
+#### 実行コマンド / 結果
+```bash
+sed -n '1,260p' spec-lite/current/discussions/window-size-manual-remediation-options-20260331.md
+rg -n "window-size|aggressive-resize|resize-window" -S .
+
+# 比較資料の内容確認と repo 内の関連参照を再確認
+```
+
+#### 変更したファイル
+- `spec-lite/current/discussions/window-size-manual-remediation-options-20260331.md` - 解決方法の比較とベストプラクティスを作成
+- `spec-lite/current/report.md` - 今回の比較整理ログを追記
+
+#### コミット
+- 該当なし
+
+#### メモ
+- 次に仕様化する場合は、この資料を根拠に `requirement.md` / `design.md` / `plan.md` を更新する。
+
+---
+
+### 2026-03-31 17:35 - 17:45
+
+#### 対象
+- Step: `window-size latest` 切り替え説明資料の作成
+- AC/EC: 調査タスクのため該当なし
+
+#### 実施内容
+- `window-size latest` へ具体的にどう切り替えるかを、手動手順とプロダクト実装方針に分けて説明する独立資料を作成した。
+- 手動コマンドとして `tmux set-window-option -t dashboard:0 window-size latest` を明記し、確認コマンドと期待結果も整理した。
+- 併せて、製品側では wrapper 起動時と runner preflight の両方で `latest` を保証するのが推奨であることを文書化した。
+
+#### 実行コマンド / 結果
+```bash
+tmux set-window-option -t dashboard:0 window-size latest
+tmux show-options -t dashboard:0 -w | rg '^window-size'
+
+# 説明資料に掲載する切り替え手順と確認手順を整理
+```
+
+#### 変更したファイル
+- `spec-lite/current/discussions/window-size-latest-switch-guide-20260331.md` - `latest` への切り替え方を説明する資料を新規作成
+- `spec-lite/current/report.md` - 今回の資料作成ログを追記
+
+#### コミット
+- 該当なし
+
+#### メモ
+- 次に仕様化する場合は、この資料と比較資料をセットで requirement / design / plan の根拠に使える。
+
+---
+
+### 2026-03-31 17:45 - 18:15
+
+#### 対象
+- Step: `window-size latest` 対応の仕様更新
+- AC/EC: AC-008 / EC-009 / EC-010
+
+#### 実施内容
+- `window-size manual` が resize 追随不良の根本原因であることを前提に、要件定義書・設計書・実装計画書を更新した。
+- 要件定義書には `window-size latest` を `dashboard` 管理契約として追加し、`AC-008`、`EC-009`、`EC-010`、および window-local option のみ変更する非侵襲制約を追記した。
+- 設計書には `get_window_option()`、`set_window_option()`、`ensure_dashboard_window_policy()` の新規 IF を定義し、wrapper 起動時と runner preflight の両方で `latest` を保証する方針を追加した。
+- 実装計画書では既存の完了済み `S01` から `S05` は変更せず維持し、追加作業として `S06` を末尾に追加した。
+- `S06` は TDD 前提で、window option API、wrapper/orchestrator の `latest` 保証、resize 追随 E2E と手動検証、品質ゲート / コミットに分解した。
+
+#### 実行コマンド / 結果
+```bash
+sed -n '1,260p' spec-lite/current/requirement.md
+sed -n '1,320p' spec-lite/current/design.md
+sed -n '1,360p' spec-lite/current/plan.md
+
+# 仕様更新後の requirement / design / plan を確認
+```
+
+#### 変更したファイル
+- `spec-lite/current/requirement.md` - `window-size latest` 契約と AC-008 / EC-009 / EC-010 を追加
+- `spec-lite/current/design.md` - window option API と `latest` 保証方針を追加
+- `spec-lite/current/plan.md` - 完了済み S01-S05 を維持したまま S06 を追加
+- `spec-lite/current/report.md` - 今回の仕様更新ログを追記
+
+#### コミット
+- 該当なし
+
+#### メモ
+- 次に実装する場合は `S06` を起点に TDD で進める。
+
+---
+
+### 2026-03-31 17:45 - 18:10
+
+#### 対象
+- Step: `window-size latest` 方針の仕様反映
+- AC/EC: AC-008 / EC-009 / EC-010
+
+#### 実施内容
+- `window-size manual` による resize 追随不良を追加スコープとして requirement / design / plan に反映した。
+- 要件定義書では `dashboard` target の `window-size latest` 管理契約、`AC-008`、`EC-009`、`EC-010`、window-local option のみ変更する非侵襲制約を追加した。
+- 設計書では `get_window_option()`、`set_window_option()`、`ensure_dashboard_window_policy()` を追加 IF として定義し、wrapper 起動時と runner preflight の両方で `latest` を保証する方針を固定した。
+- 実装計画書では既存の完了済み `S01` から `S05` を変更せず維持し、追加ステップ `S06` として `window-size latest` 収束、resize 追随 E2E、手動検証までを追記した。
+- 初回の spec reviewer は要約のみで `pass/fail` を返さなかったため、判定を明示する reviewer へ再レビューを依頼した。
+
+#### 実行コマンド / 結果
+```bash
+sed -n '1,260p' spec-lite/current/requirement.md
+sed -n '1,320p' spec-lite/current/design.md
+sed -n '1,360p' spec-lite/current/plan.md
+
+# 既存仕様との整合を確認しながら AC-008 / EC-009 / EC-010 と S06 を追記
+```
+
+#### 変更したファイル
+- `spec-lite/current/requirement.md` - `window-size latest` 契約と AC/EC を追加
+- `spec-lite/current/design.md` - window option 管理 IF と preflight 方針を追加
+- `spec-lite/current/plan.md` - 完了済み S01-S05 を維持したまま S06 を追加
+- `spec-lite/current/report.md` - 今回の仕様反映ログを追記
+
+#### コミット
+- 該当なし
+
+#### メモ
+- `spec_reviewer` の `review_status` が返り次第、必要なら findings を反映して再レビューする。
+
+---
+
+### 2026-03-31 17:45 - 18:05
+
+#### 対象
+- Step: `window-size latest` 対応の仕様更新
+- AC/EC: AC-008 / EC-009 / EC-010
+
+#### 実施内容
+- `window-size manual` による resize 追随不良への追加対応として、`requirement.md` / `design.md` / `plan.md` を更新した。
+- 要件定義では `window-size latest` の管理契約、自動回復、dashboard window-local option 限定の非侵襲制約、AC-008 と EC-009/EC-010 を追加した。
+- 設計書では `get_window_option()` / `set_window_option()` / `ensure_dashboard_window_policy()` を新規 IF として定義し、wrapper 起動時と runner preflight の両方で `latest` を保証する方針を固定した。
+- 実装計画書では既存の完了済み S01-S05 を保持したまま、新規作業として S06 を追加し、TDD の Red → Green → Refactor で進められる作業ブロックへ分解した。
+- spec reviewer へ requirement / design / plan の整合レビューを依頼した。
+
+#### 実行コマンド / 結果
+```bash
+sed -n '1,260p' spec-lite/current/requirement.md
+sed -n '1,320p' spec-lite/current/design.md
+sed -n '1,360p' spec-lite/current/plan.md
+
+# `window-size latest` 対応の差分を確認し、spec review を依頼
+```
+
+#### 変更したファイル
+- `spec-lite/current/requirement.md` - AC-008 / EC-009 / EC-010 と `window-size latest` 管理契約を追加
+- `spec-lite/current/design.md` - window option API、preflight 保証、`latest` 方針を追加
+- `spec-lite/current/plan.md` - 完了済み S01-S05 を保持したまま S06 を追加
+- `spec-lite/current/report.md` - 今回の仕様更新ログを追記
+
+#### コミット
+- 該当なし
+
+#### メモ
+- spec review の findings に応じて requirement / design / plan を是正する。
+
+---
+
+### 2026-03-31 17:20 - 17:35
+
+#### 対象
+- Step: 解決策比較とベストプラクティス整理
+- AC/EC: 調査タスクのため該当なし
+
+#### 実施内容
+- `window-size manual` を根本原因としたうえで、解決策候補を比較した。
+- 比較対象は `latest` / `smallest` / `largest` / `manual + resize-window` / 起動時のみ / 毎ループ保証 / 既存 manual session の移行戦略とした。
+- 比較結果として、`dashboard` target の `window-size` を `latest` に明示し、起動時だけでなく preflight でも保証し、既存 `manual` を自動移行する案を推奨と整理した。
+- 検討結果を独立資料 `spec-lite/current/discussions/window-size-manual-remediation-options-20260331.md` に作成した。
+
+#### 実行コマンド / 結果
+```bash
+sed -n '1,260p' spec-lite/current/discussions/resize-follow-up-analysis-20260331.md
+
+# 根本原因レポートを参照し、比較資料を起草
+```
+
+#### 変更したファイル
+- `spec-lite/current/discussions/window-size-manual-remediation-options-20260331.md` - 解決策比較とベストプラクティスを新規作成
+- `spec-lite/current/report.md` - 今回の比較整理ログを追記
+
+#### コミット
+- 該当なし
+
+#### メモ
+- 次の設計更新では、「dashboard window の window-size policy はツールが `latest` に維持する」を requirement / design 契約へ昇格させるのが自然。
+
 tmux -L "$sock" new-session -d -s dashboard -n dashboard
 tmux -L "$sock" new-window -d -P -F '#{session_name}:#{window_index}' -t dashboard
 # status=1
@@ -573,6 +844,54 @@ uv run pytest -q
 - plan:
   - `spec_reviewer`: `pass`
   - 非 blocking 指摘: CLI entrypoint 回帰の必須証跡を S04/S05 で統一する件を反映済み
+
+---
+
+## 2026-03-31 S05 最終受け入れ
+
+### 概要
+- 実装担当者の S05 修正完了後、最終受け入れ検査を再実施した。
+- 正本レポートは `spec-lite/current/discussions/acceptance-review-wrapper-fix-20260331-final.md`。
+
+### 実行コマンド / 結果
+```bash
+uv run pytest -q
+# 104 passed in 4.95s
+```
+
+### 手動検証要点
+- direct runner same-name 条件で `dashboard:0` が 3 pane に復旧した
+- wrapper 経路で全対象セッション削除後、`dashboard:0` が `1 pane + empty title` に収束した
+
+### レビュー
+- `qa_reviewer`: `pass`
+- main-agent 差分レビュー: blocking issue なし
+
+### 判定
+- 最終受け入れ: `pass`
+
+---
+
+## 2026-03-31 リサイズ追随不良の追加調査
+
+### 概要
+- ユーザーから「ローカルでは幅変更に追随しない」との報告を受け、追加調査を開始した。
+- `spec-lite/current/discussions/resize-follow-up-analysis-20260331.md` に分析レポートを作成した。
+
+### わかったこと
+- repo 現行コードでは、direct runner / wrapper の両方で `resize-window` に対するレイアウト追随を再現できた。
+- 一方で `scan_sessions()` は attached / detached を区別せず、`dashboard` 以外の全 session を pane 対象として数えている。
+- このため、ローカルに detached session が多く残っていると「幅監視不良」ではなく「対象数過多」によって見え方が悪化している可能性が高い。
+
+### 次の観測候補
+- `tmux list-sessions -F '#{session_name}|#{session_attached}|#{session_windows}'`
+- `which tmux-dashboard`
+- runner pane の `ps` 出力
+
+### 追加で確定したこと
+- ユーザー実機の `tmux list-sessions` と `tmux list-panes -t dashboard:0` により、pane title がそのまま sandbox 系 session 名になっていることを確認した。
+- このため、少なくとも今回の主因は「幅監視不良」より「session 選定が広すぎる」可能性が高い。
+- さらに `configs/dashboard.yaml` の `min_tile_width: 65` を確認した。幅 `191` で 3 session の場合、列数は `floor(191 / 65) = 2` となり、ユーザー実機の `95|95` 幅観測と一致する。
 
 ---
 
