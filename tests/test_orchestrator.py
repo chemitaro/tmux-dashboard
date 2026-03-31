@@ -308,6 +308,7 @@ def test_run_once_logs_explicit_error_when_create_window_fails():
     """目的: staging window 作成失敗を explicit な error ログで観測し、dashboard を保持することを確認する。
     前提: create_window が例外を送出する。
     期待: swap は実行されず、dashboard:0 は不変で create-window failed を含む error ログが残る。
+    かつ、実在しない predicted staging target は cleanup / residual retry 対象にしない。
     """
     from tmux_dashboard import orchestrator
     from tmux_dashboard import config
@@ -333,8 +334,9 @@ def test_run_once_logs_explicit_error_when_create_window_fails():
         logging.getLogger = original_get_logger  # type: ignore[assignment]
 
     assert io.swap_window_calls == []
-    assert io.kill_window_calls == ["dashboard:99"]
+    assert io.kill_window_calls == []
     assert io.list_panes("dashboard:0") == original
+    assert o._residual_window_target is None
     errors = [call.args[0] % call.args[1:] for call in fake_logger.error.call_args_list]
     assert any("create-window failed" in message for message in errors)
 
@@ -609,6 +611,27 @@ def test_zero_sessions_keeps_single_pane_and_returns_normally():
     assert io.create_window_calls == []
     assert io.swap_window_calls == []
     assert io.respawn_calls == []
+
+
+def test_zero_sessions_clear_stale_single_pane_title():
+    """目的: 0セッション short-circuit 後に stale pane title を残さないことを確認する。
+    前提: 直前まで複数セッション名が pane_title に設定されている。
+    期待: dashboard:0 は単一 pane へ収束し、残った pane_title は空文字になる。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(sessions=["dashboard"], width=120, height=40, panes=["%1", "%2"])
+    io.set_pane_title("%1", "alpha")
+    io.set_pane_title("%2", "beta")
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+    plan = o.run_once(window_target="dashboard:0")
+
+    assert plan["sessions"] == []
+    assert io.list_panes("dashboard:0") == ["%1"]
+    assert io.list_panes_with_titles("dashboard:0") == [("%1", "")]
 
 
 def test_run_once_reapplies_titles_after_respawn_overwrite():

@@ -557,3 +557,60 @@ def test_libtmux_create_window_raises_on_returncode_stderr_and_missing_target():
 
     assert ["new-window", "-d", "-P", "-F", "#{session_name}:#{window_index}", "-t", "dashboard:99"] in server.calls
     assert ["list-panes", "-t", "dashboard:99", "-F", "#{pane_id}"] in server.calls
+
+
+def test_libtmux_swap_and_kill_window_raise_on_tmux_failure():
+    """目的: libtmux経路の swap_window / kill_window も fail-closed で例外化されることを確認する。
+    前提: tmux command が returncode 異常または stderr を返す。
+    期待: swap_window / kill_window は silent success にならず RuntimeError を送出する。
+    """
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    class FakeResult:
+        def __init__(self, *, stdout=None, stderr=None, returncode=0):
+            self.stdout = stdout or [""]
+            self.stderr = stderr or [""]
+            self.returncode = returncode
+
+    class FakeServer:
+        def __init__(self):
+            self.calls = []
+            self.swap_mode = "returncode"
+            self.kill_mode = "stderr"
+
+        def cmd(self, *args):
+            self.calls.append(list(args))
+            if args[0] == "swap-window":
+                if self.swap_mode == "returncode":
+                    return FakeResult(returncode=1)
+                return FakeResult(stderr=["swap window failed"])
+            if args[0] == "kill-window":
+                if self.kill_mode == "returncode":
+                    return FakeResult(returncode=1)
+                return FakeResult(stderr=["kill window failed"])
+            return FakeResult()
+
+    c = config.load_config(None)
+    c.tmux.driver = "libtmux"
+    io = tmuxio.create_from_config(c)
+    server = FakeServer()
+    io.driver._server = server  # type: ignore[attr-defined]
+
+    with pytest.raises(RuntimeError):
+        io.swap_window("dashboard:99", "dashboard:0")
+
+    server.swap_mode = "stderr"
+    with pytest.raises(RuntimeError, match="swap window failed"):
+        io.swap_window("dashboard:99", "dashboard:0")
+
+    server.kill_mode = "returncode"
+    with pytest.raises(RuntimeError):
+        io.kill_window("dashboard:99")
+
+    server.kill_mode = "stderr"
+    with pytest.raises(RuntimeError, match="kill window failed"):
+        io.kill_window("dashboard:99")
+
+    assert ["swap-window", "-s", "dashboard:99", "-t", "dashboard:0"] in server.calls
+    assert ["kill-window", "-t", "dashboard:99"] in server.calls

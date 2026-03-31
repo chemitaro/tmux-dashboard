@@ -784,12 +784,18 @@ class LibtmuxDriver:
     def swap_window(self, source_target: str, destination_target: str) -> None:
         """2つの window を入れ替える。"""
         server = self._ensure_server()
-        server.cmd("swap-window", "-s", source_target, "-t", destination_target)  # type: ignore[attr-defined]
+        res = server.cmd("swap-window", "-s", source_target, "-t", destination_target)  # type: ignore[attr-defined]
+        _raise_if_cmd_failed(
+            res,
+            action="swap-window",
+            target=f"{source_target}->{destination_target}",
+        )
 
     def kill_window(self, window_target: str) -> None:
         """window を削除する。"""
         server = self._ensure_server()
-        server.cmd("kill-window", "-t", window_target)  # type: ignore[attr-defined]
+        res = server.cmd("kill-window", "-t", window_target)  # type: ignore[attr-defined]
+        _raise_if_cmd_failed(res, action="kill-window", target=window_target)
     
     def list_panes_with_titles(self, window_target: str) -> list[tuple[str, str]]:
         """指定ウィンドウのペインIDとタイトルのリストを返す。

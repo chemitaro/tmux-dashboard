@@ -25,12 +25,12 @@
   - [x] S02: orchestrator を非破壊 apply と pane 数検証に対応させ、失敗を可視化する
   - [x] S03: integrity 判定順序と E2E/回帰テストを整え、headless 復旧を保証する
   - [x] S04: wrapper 経路の `create_window` 根本原因を除去し、same-name 条件の回帰テストで固定する（code-complete。acceptance follow-up は S05）
-  - [ ] S05: 受け入れ検査の fail findings を解消し、default driver / 0 セッション収束の契約を完成させる
+  - [x] S05: 受け入れ検査の fail findings を解消し、default driver / 0 セッション収束の契約を完成させる
 - historical / superseded steps（任意）:
   - [x] 旧 `planning/current/task.md` による `-p` ベース前提の実装計画（`@spec-lite/completed/20260330_1843_planning-migration/task.md` にアーカイブ済み）
 
 ## 現行の実行対象スコープ (任意)
-- S05: libtmux fail-closed の取りこぼし補完、ghost residual queue 防止、0 セッション stale title 解消、追加受け入れ回帰の自動化
+- S05: 完了。libtmux fail-closed の取りこぼし補完、ghost residual queue 防止、0 セッション stale title 解消、追加受け入れ回帰の自動化を実施済み
 
 ## ネスト運用ルール (必須)
 - トップレベルステップ `Sxx` は「観測可能な成果」で分ける
@@ -351,7 +351,7 @@
   - 新規 CLI オプション追加
 
 #### update_plan（着手時に登録） (必須)
-- [ ] `update_plan` に、このステップの作業ブロックを登録した
+- [x] `update_plan` に、このステップの作業ブロックを登録した
 - 登録する作業ブロック:
   - S05-B1: libtmux fail-closed 補完の Red/Green
   - S05-B2: ghost residual queue 防止の Red/Green
@@ -391,11 +391,12 @@
     - Refactor: `spec-lite/current/report.md` と受け入れ検査レポートを更新し、レビュー境界とコミット境界を一致させる
 
 #### ステップ末尾（省略しない） (必須)
-- [ ] 期待するテストと必要な品質ゲートを実施し、成功した
-- [ ] 必要なレビュー / QA ゲートを通過した。少なくとも `qa_reviewer` または同等の受け入れ再判定で 3 つの fail findings が解消済みと確認した
-- [ ] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
-- [ ] `update_plan` を更新し、このステップの作業ブロックを完了にした
-- [ ] コミット境界を確定した（コミットしない場合は理由を記録した）
+- [x] 期待するテストと必要な品質ゲートを実施し、成功した
+- [x] 必要なレビュー / QA ゲートを通過した。少なくとも `qa_reviewer` または同等の受け入れ再判定で 3 つの fail findings が解消済みと確認した
+- [x] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
+- [x] `update_plan` を更新し、このステップの作業ブロックを完了にした
+- [x] コミット境界を確定した（コミットしない場合は理由を記録した）
+  - follow-up: `spec-lite/current/discussions/acceptance-review-wrapper-fix-20260331-s05-rereview.md` を authoritative な再判定記録として追加し、wrapper path の zero-session title cleanup E2E を補完した
 
 ## 未確定事項（TBD） (必須)
 - 該当なし
