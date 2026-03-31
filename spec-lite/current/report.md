@@ -574,5 +574,107 @@ uv run pytest -q
   - `spec_reviewer`: `pass`
   - 非 blocking 指摘: CLI entrypoint 回帰の必須証跡を S04/S05 で統一する件を反映済み
 
+---
+
+## 2026-03-31 S05 実装
+
+### 概要
+- 受け入れ検査で fail となっていた 3 findings を S05 スコープ内で解消した。
+- `swap-window` / `kill-window` の default driver fail-closed、create failure 時の ghost residual queue 防止、0 セッション収束時の stale title クリアを TDD で実装した。
+- failure path を触った後も、CLI `main()` の `--once` / 通常ループの exit 0 と explicit logging 契約が既存回帰テストで維持されることを再確認した。
+
+### 実施内容
+- `tmux_dashboard/tmuxio.py`
+  - `LibtmuxDriver.swap_window()` / `kill_window()` に `_raise_if_cmd_failed()` を適用し、tmux command failure を silent success にしないよう補完した。
+- `tmux_dashboard/orchestrator.py`
+  - create failure path に staging target 実在確認 helper を追加し、未作成 target では cleanup / residual enqueue を行わないよう補正した。
+  - 0 セッション short-circuit 後に残る単一 pane の title を空文字へ戻す helper を追加した。
+- `tests/test_tmuxio.py`
+  - libtmux `swap_window()` / `kill_window()` の fail-closed 回帰テストを追加した。
+- `tests/test_orchestrator.py`
+  - missing staging target を cleanup / residual retry 対象にしない回帰へ更新した。
+  - 0 セッション short-circuit 後の stale title 解消テストを追加した。
+- `tests/test_e2e_tmux.py`
+  - 実 tmux 上で、全対象セッション削除後に `dashboard:0` が 1 pane かつ空 title へ収束する E2E を追加した。
+- `tests/test_cli_entry.py`
+  - 既存の create/swap failure 時 exit 0 / explicit logging 回帰を再実行し、契約維持を確認した（追加修正なし）。
+- `spec-lite/current/plan.md`
+  - S05 完了として進捗と品質ゲートを更新した。
+
+### 実行コマンド / 結果
+```bash
+uv run pytest tests/test_tmuxio.py -q
+# 15 passed in 0.03s
+
+uv run pytest tests/test_orchestrator.py -q
+# 17 passed in 0.07s
+
+uv run pytest tests/test_orchestrator.py tests/test_e2e_tmux.py -q
+# 27 passed in 1.92s
+
+uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_e2e_tmux.py tests/test_cli_entry.py -q
+# 49 passed in 2.20s
+
+uv run pytest -q
+# 103 passed in 2.12s
+```
+
+### 変更したファイル
+- `tmux_dashboard/tmuxio.py` - libtmux `swap-window` / `kill-window` を fail-closed 化
+- `tmux_dashboard/orchestrator.py` - missing staging target の ghost residual 防止、0 セッション title クリア
+- `tests/test_tmuxio.py` - libtmux lifecycle failure の回帰テストを追加
+- `tests/test_orchestrator.py` - create failure / zero-session title 収束の回帰を追加
+- `tests/test_e2e_tmux.py` - zero-session stale title の E2E 回帰を追加
+- `spec-lite/current/plan.md` - S05 完了へ更新
+- `spec-lite/current/report.md` - S05 実装ログを追記
+
+### 判断
+- `acceptance-review-wrapper-fix-20260331.md` で指摘された 3 findings に対して、S05 の自動回帰で closed 相当の証跡を追加できた。
+- wrapper の visible window 名、attach/TTY 振る舞い、CLI の exit code 方針は変更していない。
+
+### コミット
+- 未実施（ユーザーがレビュー / コミットを担当するため）
+
+---
+
+## 2026-03-31 S05 follow-up（spec review findings 対応）
+
+### 概要
+- spec review の pass-with-findings に対応し、S05 の acceptance trail を監査可能な形で補完した。
+- 既存の direct runner zero-session E2E に加えて、wrapper path での zero-session title cleanup regression を追加した。
+
+### 実施内容
+- `tests/test_e2e_tmux.py`
+  - `./tmux-dashboard` 起動後に全対象セッションを削除し、`dashboard:0` が `1 pane + empty title` へ収束する wrapper path E2E を追加した。
+- `spec-lite/current/discussions/acceptance-review-wrapper-fix-20260331-s05-rereview.md`
+  - 既存受け入れレポートを supersede する S05 再判定レコードを追加し、3 findings が closed / 判定 pass になったことを明示した。
+- `spec-lite/current/plan.md`
+  - S05 完了の follow-up と authoritative acceptance artifact を追記した。
+
+### 実行コマンド / 結果
+```bash
+uv run pytest tests/test_e2e_tmux.py -q
+# 10 passed in 4.51s
+
+uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_e2e_tmux.py tests/test_cli_entry.py -q
+# 50 passed in 4.88s
+
+uv run pytest -q
+# 104 passed in 4.79s
+```
+
+### 変更したファイル
+- `tests/test_e2e_tmux.py` - wrapper path zero-session stale title regression を追加
+- `spec-lite/current/discussions/acceptance-review-wrapper-fix-20260331-s05-rereview.md` - S05 再判定の authoritative acceptance artifact を追加
+- `spec-lite/current/plan.md` - S05 follow-up と acceptance artifact を同期
+- `spec-lite/current/report.md` - follow-up 実施ログを追記
+
+### 判断
+- authoritative acceptance verdict は追加した再判定 artifact により `pass` として記録された。
+- wrapper path の zero-session title cleanup も direct runner と同様に自動検証できる状態になった。
+
+### コミット
+- 未実施（ユーザーがレビュー / コミットを担当するため）
+
 ## 省略/例外メモ (必須)
 - 該当なし

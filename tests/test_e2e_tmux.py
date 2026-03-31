@@ -64,6 +64,11 @@ def _pane_titles(target: str) -> list[str]:
     return [l for l in cp.stdout.decode().splitlines() if l]
 
 
+def _pane_title_rows(target: str) -> list[str]:
+    cp = _sh(["tmux", "list-panes", "-t", target, "-F", "#{pane_index}|#{pane_title}"])
+    return cp.stdout.decode().splitlines()
+
+
 def _window_width(target: str) -> int:
     cp = _sh(["tmux", "display-message", "-p", "-t", target, "#{window_width}"])
     return int(cp.stdout.decode().strip())
@@ -179,6 +184,32 @@ def test_e2e_wrapper_path_builds_layout_and_runner_window():
     assert len(_pane_widths("dashboard:0")) == 3
 
 
+def test_e2e_wrapper_path_zero_sessions_clear_stale_title():
+    """wrapper 経路で全対象セッションが消えた後、dashboard:0 は 1 pane / 空 title へ収束する。"""
+    repo_dir = Path(__file__).resolve().parents[1]
+    for name in ["alpha", "beta"]:
+        _create_session(name)
+
+    wrapper_cmd = f"cd {shlex.quote(str(repo_dir))} && ./tmux-dashboard"
+    _sh(["tmux", "new-session", "-d", "-s", "control", wrapper_cmd])
+
+    _wait_until(
+        lambda: "__tmux_dashboard_runner__" in set(_window_names("dashboard"))
+        and set(_pane_titles("dashboard:0")) == {"alpha", "beta"}
+        and len(_pane_widths("dashboard:0")) == 2
+    )
+
+    _sh(["tmux", "kill-session", "-t", "alpha"])
+    _sh(["tmux", "kill-session", "-t", "beta"])
+
+    _wait_until(
+        lambda: len(_pane_widths("dashboard:0")) == 1
+        and _pane_title_rows("dashboard:0") == ["0|"]
+    )
+
+    assert _pane_title_rows("dashboard:0") == ["0|"]
+
+
 def test_e2e_resize_single_column_layout(tmp_path):
     """幅を縮小後、単一列に再計算され pane 幅がウィンドウ幅に一致する。"""
     _create_session("dashboard")
@@ -243,6 +274,24 @@ def test_e2e_dynamic_add_then_remove(tmp_path):
     titles = _pane_titles("dashboard:0")
     assert "alpha" not in titles
     assert "beta" in titles or "gamma" in titles
+
+
+def test_e2e_zero_sessions_clear_stale_title(tmp_path):
+    """対象セッションが 0 件になった後は単一 pane かつ空 title に収束する。"""
+    _create_session("dashboard")
+    for name in ["alpha", "beta"]:
+        _create_session(name)
+
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text("tmux:\n  driver: libtmux\n", encoding="utf-8")
+    _run_dashboard_once("dashboard:0", config_path=str(cfg))
+
+    _sh(["tmux", "kill-session", "-t", "alpha"])
+    _sh(["tmux", "kill-session", "-t", "beta"])
+    _run_dashboard_once("dashboard:0", config_path=str(cfg))
+
+    assert len(_pane_widths("dashboard:0")) == 1
+    assert _pane_title_rows("dashboard:0") == ["0|"]
 
 
 def test_e2e_resize_up_and_down(tmp_path):

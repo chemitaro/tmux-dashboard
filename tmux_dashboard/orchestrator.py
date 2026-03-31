@@ -227,6 +227,25 @@ class Orchestrator:
                 residual_target,
             )
 
+    def _window_exists(self, window_target: str) -> bool:
+        """target の window が tmux 上に実在する場合のみ True を返す。"""
+        try:
+            session_name, window_index = window_target.split(":", 1)
+        except ValueError:
+            return False
+        try:
+            windows = self.io.list_windows_with_active(session_name)
+        except Exception:
+            return False
+        return any(str(idx) == str(window_index) for idx, _ in windows)
+
+    def _clear_single_pane_title(self, window_target: str) -> None:
+        """0 セッション収束時に残った単一 pane の title を中立値へ戻す。"""
+        panes = self._sorted_panes(window_target)
+        if not panes:
+            return
+        self.io.set_pane_title(panes[0], "")
+
     def apply_titles(self, window_target: str, sessions: List[str]) -> None:
         """pane border を有効化し、pane_title にセッション名を割り当てる。"""
         # ボーダーを上部にし、タイトルは pane_title を表示
@@ -330,6 +349,7 @@ class Orchestrator:
         if not sessions:
             try:
                 self.io.kill_other_panes(window_target)
+                self._clear_single_pane_title(window_target)
             except Exception as e:
                 logger.warning("failed to shrink empty dashboard: %s", e)
             self._last_signature = signature
@@ -360,7 +380,7 @@ class Orchestrator:
                     staging_target=staging_target,
                     error=create_error,
                 )
-                if not self._cleanup_window_best_effort(
+                if self._window_exists(staging_target) and not self._cleanup_window_best_effort(
                     logger,
                     window_target=window_target,
                     cleanup_target=staging_target,
