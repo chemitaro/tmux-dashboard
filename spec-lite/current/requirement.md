@@ -2,7 +2,7 @@
 種別: 要件定義書
 機能ID: "fix-tmux-headless-layout"
 機能名: "headless tmux でのレイアウト復旧"
-関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis"]
+関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331"]
 状態: "draft"
 作成者: "codex"
 最終更新: "2026-03-31"
@@ -77,6 +77,9 @@
   - 初回の pane integrity 判定ノイズを抑える
   - 再現した失敗モードをテストで担保する
   - `create_window()` が phantom target を返さず、window 作成失敗を fail-closed で扱う
+  - `swap-window` / `kill-window` failure も driver 層で fail-closed に扱う
+  - 0 セッション収束後に stale pane title を残さない
+  - create failure 後に ghost residual target を retry queue に残さない
 - MUST NOT（絶対にやらない／追加しない）:
   - 利用者に tmux attach 必須の運用を強制しない
   - dashboard 以外のセッション設定やグローバル tmux 設定を変更しない
@@ -125,8 +128,8 @@
   - Actor/Role: 開発者
   - Given: 既存の dashboard に対して再レイアウトが必要な状態（セッション増減または window size 変更）がある
   - When: orchestrator が再レイアウトを実行する
-  - Then: staging 用の一時 window または同等の内部退避機構で分割成功を確認した場合にのみ `dashboard:0` へ切り替わる。swap 前失敗では既存 `dashboard:0` 状態を保持し、swap 後の旧 window cleanup 失敗は新 `dashboard:0` を成功扱いのまま残しつつ警告で観測できる
-  - 観測点（UI/HTTP/DB/Log など）: pane 数, pane title, `dashboard:0` の中身, warning/error ログ
+  - Then: staging 用の一時 window または同等の内部退避機構で分割成功を確認した場合にのみ `dashboard:0` へ切り替わる。`swap-window` failure は driver 例外と orchestrator error log により観測され、既存 `dashboard:0` 状態を保持する。swap 後の旧 window `kill-window` cleanup 失敗は新 `dashboard:0` を成功扱いのまま残しつつ警告と residual cleanup retry 対象として観測できる
+  - 観測点（UI/HTTP/DB/Log など）: pane 数, pane title, `dashboard:0` の中身, swap/cleanup の warning/error ログ, driver 例外
   - 権限/認可条件（ある場合）: 該当なし
 - AC-003:
   - Actor/Role: 開発者
@@ -156,6 +159,13 @@
   - Then: 実在しない target を返さず、driver 層では例外、orchestrator / CLI 層では dashboard 不変と明示ログとして扱われる
   - 観測点（UI/HTTP/DB/Log など）: driver 例外, orchestrator / CLI ログ, driver 単体テスト
   - 権限/認可条件（ある場合）: 該当なし
+- AC-007:
+  - Actor/Role: 開発者
+  - Given: 直前サイクルで複数セッションの pane title が設定され、その後表示対象セッションが 0 件になった
+  - When: `run_once()` が 0 セッション short-circuit を実行する
+  - Then: `dashboard:0` は単一 pane を維持しつつ、pane title は空または 0 セッション用の中立値に更新され、削除済みセッション名を表示しない
+  - 観測点（UI/HTTP/DB/Log など）: `tmux list-panes -t dashboard:0 -F '#{pane_index}|#{pane_title}'`, orchestrator テスト
+  - 権限/認可条件（ある場合）: 該当なし
 
 ### 入力→出力例 (任意)
 - EX-001:
@@ -168,8 +178,8 @@
 ## 例外・エッジケース（仕様として固定） (必須)
 - EC-001:
   - 条件: 表示対象セッションが 0 件
-  - 期待: 既存どおり単一 pane の dashboard を維持し、エラー扱いしない
-  - 観測点（UI/HTTP/DB/Log など）: pane 数 1、ログ
+  - 期待: 既存どおり単一 pane の dashboard を維持し、エラー扱いしない。pane title は空または中立値へ収束する
+  - 観測点（UI/HTTP/DB/Log など）: pane 数 1、pane title、ログ
 - EC-002:
   - 条件: `split-window` または `split-pane` が失敗する
   - 期待: 既存 pane を破壊しきらずに失敗を観測可能にし、サイレント劣化しない
@@ -194,12 +204,17 @@
   - 条件: swap 後 cleanup 失敗で旧 window が残置し、次サイクルが来る
   - 期待: orchestrator は残置 window の best-effort cleanup を再試行し、成功でも失敗でも新規レイアウト進行を不必要に妨げない
   - 観測点: warning / info ログ、残置 window の有無、orchestrator テスト
+- EC-008:
+  - 条件: `create_window()` が window 未作成のまま失敗し、その予測 staging target が tmux 上に存在しない
+  - 期待: orchestrator はその missing target を residual cleanup queue に積まず、後続サイクルの retry を ghost target で塞がない
+  - 観測点: orchestrator テスト、warning ログ、residual queue 状態
 
 ## 用語（ドメイン語彙） (必須)
 - TERM-001: headless = tmux client が付いていない detached 実行状態
 - TERM-002: pane 数不足 = 表示対象セッション数より `dashboard:0` の pane 数が少ない状態
 - TERM-003: 分割戦略 = `split-window` / `split-pane` に渡すサイズ指定方式とその配分ロジック
 - TERM-004: phantom target = tmux に実在しないのに driver が返してしまう window target
+- TERM-005: ghost residual target = create failure 後に retry queue へ誤記録された、tmux 上に実在しない cleanup target
 
 ## 未確定事項（TBD / 要確認） (必須)
 - 該当なし

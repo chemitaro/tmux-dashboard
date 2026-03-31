@@ -2,7 +2,7 @@
 種別: 実装計画書
 機能ID: "fix-tmux-headless-layout"
 機能名: "headless tmux でのレイアウト復旧"
-関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis"]
+関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331"]
 状態: "draft"
 作成者: "codex"
 最終更新: "2026-03-31"
@@ -12,8 +12,8 @@
 # fix-tmux-headless-layout headless tmux でのレイアウト復旧 — 実装計画（TDD: Red → Green → Refactor）
 
 ## この計画で満たす要件ID (必須)
-- 対象AC: AC-001, AC-002, AC-003, AC-004, AC-005, AC-006
-- 対象EC: EC-001, EC-002, EC-003, EC-004, EC-005, EC-006, EC-007
+- 対象AC: AC-001, AC-002, AC-003, AC-004, AC-005, AC-006, AC-007
+- 対象EC: EC-001, EC-002, EC-003, EC-004, EC-005, EC-006, EC-007, EC-008
 - 対象制約（該当があれば）:
   - 依存追加なし
   - CLI 互換維持
@@ -24,12 +24,13 @@
   - [x] S01: `-l` ベースの分割 API と分割長算出を追加し、headless で split が通る土台を作る
   - [x] S02: orchestrator を非破壊 apply と pane 数検証に対応させ、失敗を可視化する
   - [x] S03: integrity 判定順序と E2E/回帰テストを整え、headless 復旧を保証する
-  - [x] S04: wrapper 経路の `create_window` 根本原因を除去し、same-name 条件の回帰テストで固定する
+  - [x] S04: wrapper 経路の `create_window` 根本原因を除去し、same-name 条件の回帰テストで固定する（code-complete。acceptance follow-up は S05）
+  - [ ] S05: 受け入れ検査の fail findings を解消し、default driver / 0 セッション収束の契約を完成させる
 - historical / superseded steps（任意）:
   - [x] 旧 `planning/current/task.md` による `-p` ベース前提の実装計画（`@spec-lite/completed/20260330_1843_planning-migration/task.md` にアーカイブ済み）
 
 ## 現行の実行対象スコープ (任意)
-- S04: `create_window()` の target 契約修正、phantom target 防止、wrapper actual-path regression、partial-create cleanup、residual cleanup retry branches の自動検証
+- S05: libtmux fail-closed の取りこぼし補完、ghost residual queue 防止、0 セッション stale title 解消、追加受け入れ回帰の自動化
 
 ## ネスト運用ルール (必須)
 - トップレベルステップ `Sxx` は「観測可能な成果」で分ける
@@ -40,19 +41,21 @@
 ### 要件 ↔ ステップ対応表 (必須)
 - active / current trace:
   - AC-001 → S01, S03
-  - AC-002 → S02
+  - AC-002 → S02, S05
   - AC-003 → S02, S03
   - AC-004 → S02
   - AC-005 → S04
-  - AC-006 → S04
-  - EC-001 → S02
+  - AC-006 → S04, S05
+  - AC-007 → S05
+  - EC-001 → S02, S05
   - EC-002 → S02, S03
   - EC-003 → S02
   - EC-004 → S01, S03
   - EC-005 → S04
   - EC-006 → S04
-  - EC-007 → S04
-  - 非交渉制約 → S01, S02, S03, S04
+  - EC-007 → S04, S05
+  - EC-008 → S05
+  - 非交渉制約 → S01, S02, S03, S04, S05
 
 ## レビュー / QA ゲート方針 (必須)
 - G1:
@@ -262,11 +265,12 @@
 ### S04 — wrapper 経路の create_window 根本原因を除去し、same-name 条件を固定する (必須)
 - 対象: AC-005 / AC-006 / EC-005 / EC-006 / EC-007 / 制約: CLI 互換維持, wrapper visible window 名維持
 - 設計参照:
-  - 対象IF/API: IF-006
+  - 対象IF/API: IF-006, IF-008
 - 対象テスト:
     - `tests/test_tmuxio.py`
     - `tests/test_orchestrator.py`
     - `tests/test_e2e_tmux.py`
+    - `tests/test_cli_entry.py`
     - CLI entrypoint failure test
 - このステップで「追加しないこと（スコープ固定）」:
   - wrapper の visible window 名変更
@@ -289,6 +293,7 @@
   - `tests/test_tmuxio.py`
   - `tests/test_orchestrator.py`
   - `tests/test_e2e_tmux.py`
+  - `tests/test_cli_entry.py`
   - CLI entrypoint failure test
 
 #### 作業ブロック（必須）
@@ -322,7 +327,7 @@
 - S04-B4: 品質ゲート / 報告 / コミット
   - S04-B4-I1:
     - Red: 該当なし
-    - Green: `uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_e2e_tmux.py -q` と `uv run pytest -q` を実行し、成功を確認する
+    - Green: `uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_e2e_tmux.py tests/test_cli_entry.py -q` と `uv run pytest -q` を実行し、成功を確認する
     - Refactor: `spec-lite/current/report.md` を更新し、review スコープでコミット境界を確定する
 
 #### ステップ末尾（省略しない） (必須)
@@ -332,6 +337,66 @@
 - [x] `update_plan` を更新し、このステップの作業ブロックを完了にした
 - [x] コミット境界を確定した（コミットは未実施。ユーザーレビュー待ち）
 
+### S05 — 受け入れ検査の fail findings を解消し、default driver と 0 セッション収束を完成させる (必須)
+- 対象: AC-002 / AC-006 / AC-007 / EC-007 / EC-008 / 制約: CLI 互換維持, dashboard 非侵襲
+- 設計参照:
+  - 対象IF/API: IF-006a, IF-006b, IF-007, IF-008
+- 対象テスト:
+    - `tests/test_tmuxio.py`
+    - `tests/test_orchestrator.py`
+    - `tests/test_e2e_tmux.py`
+- このステップで「追加しないこと（スコープ固定）」:
+  - wrapper の attach/TTY 振る舞い変更
+  - renderer / tile 表示仕様変更
+  - 新規 CLI オプション追加
+
+#### update_plan（着手時に登録） (必須)
+- [ ] `update_plan` に、このステップの作業ブロックを登録した
+- 登録する作業ブロック:
+  - S05-B1: libtmux fail-closed 補完の Red/Green
+  - S05-B2: ghost residual queue 防止の Red/Green
+  - S05-B3: 0 セッション stale title 解消の Red/Green
+  - S05-B4: 受け入れ回帰 / QA / 報告 / コミット
+
+#### 期待する振る舞い（テストケース） (必須)
+- Given: tmux / libtmux が `swap-window` または `kill-window` failure を返す条件、または create failure で staging target が未作成の条件、または直前サイクルの pane title が残ったまま表示対象セッションが 0 件になる条件
+- When: `run_once()` または wrapper/direct runner を実行する
+- Then: default driver でも swap / cleanup failure は例外化され、missing staging target は residual queue に積まれず、0 セッション時は単一 pane かつ stale でない title に収束する。create/swap 系 failure を再度触っても CLI entrypoint は exit 0 と明示ログ契約を維持する
+- 観測点（UI/HTTP/DB/Log など）: driver 例外、orchestrator ログ、`tmux list-panes -t dashboard:0 -F '#{pane_index}|#{pane_title}'`, residual queue 状態、E2E テスト結果
+- 追加/更新するテスト:
+  - `tests/test_tmuxio.py`
+  - `tests/test_orchestrator.py`
+  - `tests/test_e2e_tmux.py`
+
+#### 作業ブロック（必須）
+- S05-B1: libtmux fail-closed 補完
+  - S05-B1-I1:
+    - Red: libtmux `swap_window()` / `kill_window()` が tmux failure を silent success にしてしまうテストを追加する
+    - Green: `swap_window()` / `kill_window()` でも `_raise_if_cmd_failed()` 相当の失敗検知を適用する
+    - Refactor: driver の tmux command result 検査 helper を整理し、create/swap/kill の契約を揃える
+- S05-B2: ghost residual queue 防止
+  - S05-B2-I1:
+    - Red: create failure で missing staging target が residual queue に積まれ、後続 retry を塞ぐテストを追加する
+    - Green: create failure path で target 実在確認を行い、missing target は cleanup warning の補足のみに留めて queue へ積まない
+    - Refactor: residual target の enqueue 条件を helper 化し、swap 後 cleanup 失敗との分岐を明確にする
+- S05-B3: 0 セッション stale title 解消
+  - S05-B3-I1:
+    - Red: 直前サイクルの pane title が 0 セッション short-circuit 後も残るテストを追加する
+    - Green: 0 セッション時に単一 pane へ収束させたあと、pane title を空文字または設計で定めた中立値へ更新する
+    - Refactor: 0 セッション path の title policy を helper 化し、integrity / respawn ロジックとの境界を整理する
+- S05-B4: 受け入れ回帰 / QA / 報告 / コミット
+  - S05-B4-I1:
+    - Red: 受け入れ検査で観測した 3 つの fail findings を再現する回帰テスト群を揃える
+    - Green: `uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_e2e_tmux.py tests/test_cli_entry.py -q` と `uv run pytest -q` を実行し、成功を確認する。加えて `qa_reviewer` または同等の受け入れ再判定で `acceptance-review-wrapper-fix-20260331.md` の 3 findings が閉じたことを確認する
+    - Refactor: `spec-lite/current/report.md` と受け入れ検査レポートを更新し、レビュー境界とコミット境界を一致させる
+
+#### ステップ末尾（省略しない） (必須)
+- [ ] 期待するテストと必要な品質ゲートを実施し、成功した
+- [ ] 必要なレビュー / QA ゲートを通過した。少なくとも `qa_reviewer` または同等の受け入れ再判定で 3 つの fail findings が解消済みと確認した
+- [ ] `spec-lite/current/report.md` に実行コマンド / 結果 / 変更ファイル / 判断を記録した
+- [ ] `update_plan` を更新し、このステップの作業ブロックを完了にした
+- [ ] コミット境界を確定した（コミットしない場合は理由を記録した）
+
 ## 未確定事項（TBD） (必須)
 - 該当なし
 
@@ -339,6 +404,7 @@
 - 対象AC/ECがすべて満たされ、テストまたは文書化された検証で保証されている
 - `uv run pytest -q` がグリーンである
 - headless 回帰と wrapper same-name 回帰を再現するテストが追加され、今回の障害モードを自動検証できる
+- 現行スコープである S05 について、`acceptance-review-wrapper-fix-20260331.md` の 3 findings が再判定で closed と確認されている
 - 必要なレビュー / QA ゲートを通過している
 - MUST NOT / OUT OF SCOPE を破っていない
 - `report.md` と plan の進捗が一致している

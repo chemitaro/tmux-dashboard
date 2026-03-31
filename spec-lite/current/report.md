@@ -521,5 +521,58 @@ uv run pytest -q
 - title を継続的に上書きする特殊端末があるなら、pane title 再適用の再試行戦略を設定化してもよい
 - ...
 
+---
+
+## 2026-03-31 受け入れ検査
+
+### 概要
+- 実装担当者が完了させた `69dec89 fix(tmux): wrapper経路のcreate-window失敗をfail-closedにする` を対象に、Git 差分確認、コードレビュー、`uv run pytest -q`、手動テストによる受け入れ検査を実施した。
+- 検査の独立レポートは `spec-lite/current/discussions/acceptance-review-wrapper-fix-20260331.md` に記録した。
+
+### 結果
+- 自動テスト: `100 passed`
+- code review: `fail`
+- 受け入れ判定: `fail`
+
+### 主な理由
+- `tmux_dashboard/tmuxio.py` の `LibtmuxDriver.swap_window()` / `kill_window()` が tmux command failure を例外化しておらず、fail-closed 契約が default driver で崩れる。
+- `tmux_dashboard/orchestrator.py` の create failure path が、存在しない staging target を residual cleanup queue に積みうる。
+- 手動テストで、0 セッション収束後に `dashboard:0` の pane title が古い session 名のまま残る観測を確認した。
+
+### 次アクション
+- 上記 3 点を追加修正スコープとして requirement / design / plan に反映するか、既存 S04 の追補として次の実装修正に進む。
+
+---
+
+## 2026-03-31 追加仕様整備
+
+### 概要
+- 受け入れ検査で fail となった 3 点に対する解決方針を docs に反映した。
+- 独立資料として `spec-lite/current/discussions/wrapper-fix-best-practices-20260331.md` を作成した。
+- `requirement.md`, `design.md`, `plan.md` を更新し、追加修正ステップ `S05` を定義した。
+
+### 更新内容
+- `spec-lite/current/requirement.md`
+  - `swap-window` / `kill-window` fail-closed
+  - ghost residual target 防止
+  - 0 セッション stale title 解消
+  - AC-007 / EC-008 追記
+- `spec-lite/current/design.md`
+  - IF-006a / IF-006b の契約固定
+  - 0 セッション title クリアと ghost residual 回避フロー追加
+  - mapping / test trace を受け入れ findings に合わせて補強
+- `spec-lite/current/plan.md`
+  - 既存 S01-S04 は完了済みのまま保持
+  - 追加修正ステップ S05 を定義
+  - acceptance 再判定を S05 と plan DoD に組み込んだ
+
+### レビュー結果
+- requirement + design:
+  - `spec_reviewer`: `pass`
+  - 非 blocking 指摘: 設計内のトレーサビリティ表現を一部補強済み
+- plan:
+  - `spec_reviewer`: `pass`
+  - 非 blocking 指摘: CLI entrypoint 回帰の必須証跡を S04/S05 で統一する件を反映済み
+
 ## 省略/例外メモ (必須)
 - 該当なし

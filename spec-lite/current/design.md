@@ -2,7 +2,7 @@
 種別: 設計書
 機能ID: "fix-tmux-headless-layout"
 機能名: "headless tmux でのレイアウト復旧"
-関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis"]
+関連Issue: ["tmux split-window headless failure analysis", "wrapper create window root cause analysis", "wrapper create-window acceptance review 20260331"]
 状態: "draft"
 作成者: "codex"
 最終更新: "2026-03-31"
@@ -20,6 +20,9 @@
   - pane 数不足や分割失敗を可視化する
   - 初回 integrity ノイズを抑える
   - 再現条件をテストで担保する
+  - `swap-window` / `kill-window` failure を default driver でも fail-closed に扱う
+  - create failure 後に ghost residual target を残さない
+  - 0 セッション収束後の pane title を stale session 名のまま残さない
 - MUST NOT:
   - attach 必須運用へ仕様変更しない
   - dashboard 以外の tmux 設定へ侵襲しない
@@ -45,15 +48,19 @@
   - `tests/test_e2e_tmux.py`: headless E2E と `xfail` 条件
   - `@spec-lite/current/discussions/tmux-split-window-headless-analysis.md`: 実測・外部調査結果
   - `@spec-lite/current/discussions/wrapper-create-window-root-cause-20260331.md`: wrapper 固有 root cause の実測
+  - `@spec-lite/current/discussions/acceptance-review-wrapper-fix-20260331.md`: 追加修正が必要な受け入れ findings
 - 観測した現状（事実）:
   - `CliDriver.split_window()` / `split_pane()` は `-p` 固定
   - `LibtmuxDriver.split_window()` / `split_pane()` も `-p` 固定
   - `CliDriver.create_window()` / `LibtmuxDriver.create_window()` は `new-window -t session_name` を使っている
   - wrapper は `dashboard` session と visible window `dashboard` を作るため、`new-window -t dashboard` が曖昧になり `index 0 in use` で失敗する
   - `LibtmuxDriver.create_window()` は `returncode` / `stderr` を見ず、window が未作成でも requested target を返し得る
+  - `LibtmuxDriver.swap_window()` / `kill_window()` も `returncode` / `stderr` を見ず、tmux command failure を silent success にし得る
   - `apply_layout()` は `kill_other_panes()` を先に呼び、失敗時の rollback がない
   - `run_once()` は `zip(tiles_sorted, sessions)` で pane 数不足を黙殺する
   - `check_pane_integrity()` は `apply_titles()` 前に呼ばれる
+  - 0 セッション short-circuit は pane 数を 1 つに戻すが、pane title は直前セッション名のまま残り得る
+  - create failure path は存在しない staging target でも cleanup / residual 登録を試みる
 - 採用するパターン（命名/責務/例外/DI/テストなど）:
   - driver abstraction は維持し、CLI/libtmux の両方に同じ契約を適用する
   - orchestrator は高レベル判断、tmuxio は tmux コマンド差分吸収に責務を分離する
@@ -93,7 +100,13 @@
 - Flow for EC-001:
   1) `run_once()` が表示対象 session 0 件を検出する
   2) staging は作らず、`kill_other_panes(window_target)` を実行して `dashboard:0` を明示的に単一 pane へ収束させる
-  3) warning を出さず成功扱いで plan を返す
+  3) 単一 pane の pane title を空文字に明示更新する
+  4) warning を出さず成功扱いで plan を返す
+- Flow for EC-008:
+  1) `create_window()` が window 未作成のまま失敗する
+  2) orchestrator は予測 staging target の実在有無を確認する
+  3) 実在しない target には cleanup / residual 登録を行わない
+  4) 既存 dashboard を保持したまま error log を残して次サイクルへ戻る
 
 ## データ・バリデーション（必要最小限） (任意)
 - MODEL-001: `SplitLength`
@@ -157,10 +170,18 @@
   - Output: 実在する created window target
   - Errors/Exceptions: tmux / libtmux の `new-window` が失敗した場合、または作成後に対象 window 実在確認が取れない場合は例外
   - 契約: `new-window` には `session_name:window_index` target を渡し、phantom target を返さない
+- IF-006a: `TmuxIO.swap_window(source_target: str, destination_target: str) -> None`
+  - Input: source / destination window target
+  - Output: なし
+  - Errors/Exceptions: tmux / libtmux の `swap-window` failure は driver 層で必ず例外化する
+- IF-006b: `TmuxIO.kill_window(window_target: str) -> None`
+  - Input: cleanup 対象 window target
+  - Output: なし
+  - Errors/Exceptions: tmux / libtmux の `kill-window` failure は driver 層で必ず例外化する
 - IF-007: `Orchestrator.run_once(window_target: str = "dashboard:0") -> dict`
   - Input: target window
   - Output: 現在の plan 相当辞書
-  - Errors/Exceptions: layout / create / swap failure は内部で捕捉し、dashboard 不変のまま明示ログを残して plan を返す。swap 後 cleanup 失敗は warning を出しつつ成功扱いで進める。0 セッション時は `kill_other_panes(window_target)` により 1 pane へ収束させたうえで warning なしに short-circuit する
+  - Errors/Exceptions: layout / create / swap failure は内部で捕捉し、dashboard 不変のまま明示ログを残して plan を返す。swap 後 cleanup 失敗は warning を出しつつ成功扱いで進める。0 セッション時は `kill_other_panes(window_target)` により 1 pane へ収束させ、pane title を空文字へ更新したうえで warning なしに short-circuit する
 - IF-008: `tmux_dashboard.__main__.main(argv: list[str] | None = None) -> int`
   - Input: CLI 引数
   - Output: exit code
@@ -172,8 +193,8 @@
 - 変更（Modify）:
   - `tmux_dashboard/layout.py`: absolute-cell 既定 / `%` fallback の `-l` ベース分割長算出関数を追加し、percent split 前提を更新
   - `tmux_dashboard/tmuxio.py`: split API を `length` 指定へ変更し、CLI/libtmux 両方で `-l` を使う。追加で `create_window()` の target 指定と失敗検知を修正する
-  - `tmux_dashboard/orchestrator.py`: staging window ベースの非破壊レイアウト適用、失敗結果処理、integrity チェック順序、mapping 検証を修正し、staging 作成失敗を explicit に扱う
-  - `tmux-dashboard`: wrapper 経路の regression を再現する integration test の前提として現行動作を維持しつつ、必要なら runner 起動タイミングの観測補助を追加する
+  - `tmux_dashboard/orchestrator.py`: staging window ベースの非破壊レイアウト適用、失敗結果処理、integrity チェック順序、mapping 検証を修正し、staging 作成失敗を explicit に扱う。追加で ghost residual target 回避と 0 セッション時 title クリアを実装する
+  - `tmux-dashboard`: 原則 read-only。wrapper actual-path E2E の再現前提として現行 session/window/runner 構成を維持し、今回の追加修正では変更対象にしない
   - `tests/test_tmuxio.py`: split 呼び出しの期待値を `-l` ベースへ更新し、`create_window()` の契約を追加検証する
   - `tests/test_orchestrator.py`: apply_layout の非破壊性、pane 数不足、integrity 順序、staging 作成失敗のテストを追加
   - `tests/test_e2e_tmux.py`: headless 条件で `-l` 経路が通ることに加え、wrapper と同じ session/window 同名条件を検証するケースを追加する
@@ -203,6 +224,7 @@
   - cleanup warning で残置した旧 window target は orchestrator が 1 件だけ記憶し、次サイクル冒頭で best-effort に再 `kill-window` を試す
   - 再cleanup 成功時は記憶を消す
   - 再cleanup 失敗時は warning を再記録しつつ、新しい staging は別の未使用 index を選んで進める
+  - create failure 直後は `window_exists(target)` 相当の存在確認を通った target だけを residual 対象にする。missing target は warning 補足はしても queue へ積まない
 - staging window 作成:
   - `create_window()` は `requested_target = f"{session_name}:{window_index}"` を tmux の `-t` にそのまま渡す
   - CLI driver は subprocess 失敗をそのまま例外化する
@@ -222,6 +244,7 @@
   - `run_once()` failure は dashboard 不変と明示ログで観測する
   - `run_once()` cleanup warning は新 `dashboard:0` 維持 + warning ログ + 残置 window target で観測する
   - CLI failure は `--once` / 通常ループとも exit 0 を維持しつつログで観測する
+  - 0 セッション short-circuit は pane 数 1 と pane title 空文字を UI 観測点として固定する
 - log contract:
   - create/split/pane-shortage/swap 前 failure は `ERROR` とし、少なくとも `window_target`, `staging_target`（存在する場合）, 根本エラー文字列を含める
   - cleanup warning は `WARNING` とし、少なくとも `window_target`, `residual_window_target`, 根本エラー文字列を含める
@@ -229,11 +252,12 @@
 
 ## マッピング（要件 → 設計） (必須)
 - AC-001 → IF-001, IF-002, IF-003, IF-004, `tmux_dashboard/layout.py`, `tmux_dashboard/tmuxio.py`, `tests/test_e2e_tmux.py`
-- AC-002 → IF-004, `tmux_dashboard/orchestrator.py`, `tests/test_orchestrator.py`
+- AC-002 → IF-004, IF-006a, IF-006b, `tmux_dashboard/orchestrator.py`, `tests/test_orchestrator.py`
 - AC-003 → `tmux_dashboard/orchestrator.py`（integrity 順序変更）, `tests/test_pane_integrity.py`, `tests/test_orchestrator.py`
 - AC-004 → IF-005, `tmux_dashboard/orchestrator.py`, `tests/test_orchestrator.py`
 - AC-005 → IF-006, `tmux-dashboard`, `tmux_dashboard/tmuxio.py`, `tests/test_e2e_tmux.py`
-- AC-006 → IF-006, `tmux_dashboard/tmuxio.py`, `tmux_dashboard/orchestrator.py`, `tests/test_tmuxio.py`, `tests/test_orchestrator.py`
+- AC-006 → IF-006, IF-006a, IF-006b, `tmux_dashboard/tmuxio.py`, `tmux_dashboard/orchestrator.py`, `tests/test_tmuxio.py`, `tests/test_orchestrator.py`
+- AC-007 → IF-007, `tmux_dashboard/orchestrator.py`, `tests/test_orchestrator.py`, `tests/test_e2e_tmux.py`
 - EC-001 → `tmux_dashboard/orchestrator.py`, `tests/test_orchestrator.py`
 - EC-002 → IF-004, IF-005, `tests/test_orchestrator.py`, `tests/test_e2e_tmux.py`
 - EC-003 → `tmux_dashboard/orchestrator.py`, `tests/test_pane_integrity.py`
@@ -241,6 +265,7 @@
 - EC-005 → IF-006, `tmux_dashboard/tmuxio.py`, `tests/test_tmuxio.py`, `tests/test_e2e_tmux.py`
 - EC-006 → IF-006, `tmux_dashboard/tmuxio.py`, `tmux_dashboard/orchestrator.py`, `tests/test_tmuxio.py`, `tests/test_orchestrator.py`
 - EC-007 → `tmux_dashboard/orchestrator.py`, `tests/test_orchestrator.py`
+- EC-008 → IF-006, IF-007, `tmux_dashboard/orchestrator.py`, `tests/test_orchestrator.py`
 - 非交渉制約 → 依存追加なし、CLI 互換維持、TDD を plan / tests で担保
 
 ## テスト戦略（最低限ここまで具体化） (任意)
@@ -252,9 +277,13 @@
     - `tests/test_orchestrator.py`: apply_layout 非破壊性、pane 数不足の明示失敗、integrity 順序、staging 作成失敗
     - `tests/test_orchestrator.py`: `swap-window` 成功後に `kill-window` が失敗した場合、`LayoutApplyResult.warning_message` と `residual_window_target` を返しつつ新 `dashboard:0` を維持する
     - `tests/test_orchestrator.py`: 残置 window を次サイクルで best-effort cleanup し、再失敗でも新規 staging 適用を妨げない
+    - `tests/test_tmuxio.py`: libtmux `swap_window()` / `kill_window()` が tmux failure を例外化する
+    - `tests/test_orchestrator.py`: create failure で missing staging target を residual queue に積まない
+    - `tests/test_orchestrator.py`: 0 セッション時に pane title が空文字へクリアされる
   - Integration:
     - `tests/test_e2e_tmux.py`: headless で `-l` ベース分割により pane が増えること
     - `tests/test_e2e_tmux.py`: wrapper と同じ `session/window same-name` 条件でも direct runner と wrapper の両方が通ること
+    - `tests/test_e2e_tmux.py`: wrapper 起動後に全対象セッションを削除すると `dashboard:0` が 1 pane かつ空 title へ収束すること
   - Frontend: 該当なし
 - どのAC/ECをどのテストで保証するか:
   - AC-001 → `tests/test_tmuxio.py`, `tests/test_e2e_tmux.py`
@@ -264,6 +293,7 @@
   - AC-004 → `tests/test_orchestrator.py`
   - AC-005 → `tests/test_e2e_tmux.py`
   - AC-006 → `tests/test_tmuxio.py`, `tests/test_orchestrator.py`
+  - AC-007 → `tests/test_orchestrator.py`, `tests/test_e2e_tmux.py`
   - EC-001 → `tests/test_orchestrator.py`
   - EC-002 → `tests/test_orchestrator.py`, `tests/test_e2e_tmux.py`
   - EC-003 → `tests/test_pane_integrity.py`, `tests/test_orchestrator.py`
@@ -271,6 +301,7 @@
   - EC-005 → `tests/test_tmuxio.py`, `tests/test_e2e_tmux.py`
   - EC-006 → `tests/test_tmuxio.py`, `tests/test_orchestrator.py`
   - EC-007 → `tests/test_orchestrator.py`
+  - EC-008 → `tests/test_orchestrator.py`
 - 非交渉制約（requirement.md）をどう検証するか:
   - 制約: 依存追加なし
     - 検証方法: `pyproject.toml` を変更しない
