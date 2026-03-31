@@ -36,6 +36,15 @@ doctor:
 	else \
 		echo 'OK: Python >=3.10'; \
 	fi; \
+	if [ ! -x "$(CURDIR)/.venv/bin/python" ]; then \
+		echo 'ERROR: repo virtualenv is missing or incomplete (.venv/bin/python not found).'; problems=1; \
+	elif ! (cd "$(CURDIR)" && "$(CURDIR)/.venv/bin/python" -c 'import yaml, libtmux, tmux_dashboard') >/dev/null 2>&1; then \
+		echo 'ERROR: repo virtualenv is broken (cannot import PyYAML/libtmux/tmux_dashboard).'; \
+		echo 'INFO: repair with: cd "$(CURDIR)" && rm -rf .venv && UV_CACHE_DIR="$(CURDIR)/.tmp/uv-cache" $(UV) sync --locked'; \
+		problems=1; \
+	else \
+		echo 'OK: repo virtualenv imports are healthy'; \
+	fi; \
 	if [ -f "$(CONFIG)" ]; then \
 		echo "OK: config found -> $(CONFIG)"; \
 	else \
