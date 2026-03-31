@@ -246,6 +246,21 @@ class Orchestrator:
             return
         self.io.set_pane_title(panes[0], "")
 
+    def ensure_dashboard_window_policy(self, window_target: str) -> None:
+        """dashboard 管理 window の window-size policy を latest に収束させる。"""
+        if not window_target.startswith("dashboard:"):
+            return
+        logger = logging.getLogger("tmux_dashboard.orchestrator")
+        current = self.io.get_window_option(window_target, "window-size")
+        if current == "latest":
+            return
+        self.io.set_window_option(window_target, "window-size", "latest")
+        logger.info(
+            "updated window-size policy: window_target=%s from=%s to=latest",
+            window_target,
+            current,
+        )
+
     def apply_titles(self, window_target: str, sessions: List[str]) -> None:
         """pane border を有効化し、pane_title にセッション名を割り当てる。"""
         # ボーダーを上部にし、タイトルは pane_title を表示
@@ -311,6 +326,7 @@ class Orchestrator:
         
         # dashboardセッションの存在確認とwindow_size取得を試行
         try:
+            self.ensure_dashboard_window_policy(window_target)
             W, H = self.window_size(window_target)
             logger.info("detected: sessions=%s, window=%sx%s", sessions, W, H)
         except (subprocess.CalledProcessError, Exception) as e:
@@ -326,6 +342,7 @@ class Orchestrator:
             
             # 再試行
             try:
+                self.ensure_dashboard_window_policy(window_target)
                 W, H = self.window_size(window_target)
                 logger.info("Retry successful: window=%sx%s", W, H)
             except Exception as retry_error:
@@ -350,6 +367,7 @@ class Orchestrator:
             try:
                 self.io.kill_other_panes(window_target)
                 self._clear_single_pane_title(window_target)
+                self.ensure_dashboard_window_policy(window_target)
             except Exception as e:
                 logger.warning("failed to shrink empty dashboard: %s", e)
             self._last_signature = signature
@@ -500,4 +518,10 @@ class Orchestrator:
             logger.info("titles: %s", [t for t in self.io.list_panes_detailed(window_target)])
         except Exception:
             pass
+        try:
+            # staging window の resize-window 副作用で policy が manual へ戻ることがあるため、
+            # サイクル末尾でも latest を保証する。
+            self.ensure_dashboard_window_policy(window_target)
+        except Exception as e:
+            logger.warning("failed to ensure window-size policy at cycle end: %s", e)
         return plan

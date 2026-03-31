@@ -74,6 +74,15 @@ def _window_width(target: str) -> int:
     return int(cp.stdout.decode().strip())
 
 
+def _window_option(target: str, option_name: str) -> str:
+    cp = _sh(["tmux", "show-options", "-w", "-t", target, option_name])
+    line = cp.stdout.decode().strip()
+    parts = line.split(None, 1)
+    if len(parts) != 2:
+        raise AssertionError(f"unexpected option output: {line}")
+    return parts[1]
+
+
 def _pane_widths(target: str) -> list[int]:
     cp = _sh(["tmux", "list-panes", "-t", target, "-F", "#{pane_width}"])
     return [int(x) for x in cp.stdout.decode().splitlines() if x]
@@ -313,3 +322,52 @@ def test_e2e_resize_up_and_down(tmp_path):
     _sh(["tmux", "resize-window", "-t", "dashboard:0", "-x", "79", "-y", "40"])
     _run_dashboard_once("dashboard:0", config_path=str(cfg))
     assert len(_pane_widths("dashboard:0")) == 6
+
+
+def test_e2e_direct_runner_recovers_manual_window_size_to_latest(tmp_path):
+    """direct runner が既存 manual 汚染を latest へ自動回復することを確認する。"""
+    _create_session("dashboard")
+    for name in ["alpha", "beta"]:
+        _create_session(name)
+
+    _sh(["tmux", "set-window-option", "-t", "dashboard:0", "window-size", "manual"])
+    assert _window_option("dashboard:0", "window-size") == "manual"
+
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text("tmux:\n  driver: libtmux\n", encoding="utf-8")
+    _run_dashboard_once("dashboard:0", config_path=str(cfg))
+
+    assert _window_option("dashboard:0", "window-size") == "latest"
+
+
+def test_e2e_wrapper_recovers_manual_and_follows_resize():
+    """wrapper 経路で manual を latest へ回復し、resize 追随することを確認する。"""
+    repo_dir = Path(__file__).resolve().parents[1]
+    _sh(["tmux", "new-session", "-d", "-s", "dashboard", "-n", "dashboard"])
+    for name in ["alpha", "beta", "gamma"]:
+        _create_session(name)
+    _sh(["tmux", "set-window-option", "-t", "dashboard:0", "window-size", "manual"])
+    assert _window_option("dashboard:0", "window-size") == "manual"
+
+    wrapper_cmd = f"cd {shlex.quote(str(repo_dir))} && ./tmux-dashboard"
+    _sh(["tmux", "new-session", "-d", "-s", "control", wrapper_cmd])
+
+    _wait_until(
+        lambda: "__tmux_dashboard_runner__" in set(_window_names("dashboard"))
+        and _window_option("dashboard:0", "window-size") == "latest"
+        and set(_pane_titles("dashboard:0")) == {"alpha", "beta", "gamma"}
+    )
+
+    _sh(["tmux", "resize-window", "-t", "dashboard:0", "-x", "79", "-y", "40"])
+    _wait_until(
+        lambda: _window_width("dashboard:0") == 79
+        and len(_pane_widths("dashboard:0")) == 3
+        and all(width == 79 for width in _pane_widths("dashboard:0"))
+    )
+
+    _sh(["tmux", "resize-window", "-t", "dashboard:0", "-x", "191", "-y", "98"])
+    _wait_until(
+        lambda: _window_width("dashboard:0") == 191
+        and len(_pane_widths("dashboard:0")) == 3
+        and max(_pane_widths("dashboard:0")) > 79
+    )

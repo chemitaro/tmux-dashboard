@@ -97,6 +97,36 @@ def test_cli_capture_and_set_options(monkeypatch):
     assert "select-pane -t %1 -T alpha" in issued[2]
 
 
+def test_cli_get_and_set_window_option(monkeypatch):
+    """目的: CLI経路の window option 取得/設定契約を確認する。
+    前提: show-options が `window-size manual` を返す。
+    期待: get は `manual` を返し、set は `-w` で `latest` を設定する。
+    """
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    issued = []
+
+    def fake_run(args, capture_output=True, check=True):
+        issued.append(" ".join(args))
+        if args[:3] == ["tmux", "show-options", "-w"]:
+            return _fake_completed("window-size manual\n")
+        return _fake_completed("")
+
+    monkeypatch.setattr(tmuxio, "_run_subprocess", fake_run)
+
+    c = config.load_config(None)
+    c.tmux.driver = "cli"
+    io = tmuxio.create_from_config(c)
+
+    current = io.get_window_option("dashboard:0", "window-size")
+    io.set_window_option("dashboard:0", "window-size", "latest")
+
+    assert current == "manual"
+    assert any("show-options -w -t dashboard:0 window-size" in cmd for cmd in issued)
+    assert any("set-option -w -t dashboard:0 window-size latest" in cmd for cmd in issued)
+
+
 def test_libtmux_calls_use_cmd(monkeypatch):
     """libtmuxドライバは obj.cmd(...) を用いて必要な引数で呼び出す。"""
     from tmux_dashboard import tmuxio
@@ -156,6 +186,69 @@ def test_libtmux_calls_use_cmd(monkeypatch):
     assert ["set-option", "-w", "-t", "dashboard:0", "pane-border-status", "top"] in server_calls
     assert ["select-pane", "-t", "%9", "-T", "name"] in server_calls
     assert (w, h) == (120, 50)
+
+
+def test_libtmux_get_and_set_window_option():
+    """目的: libtmux経路の window option 取得/設定契約を確認する。
+    前提: show-options が `window-size manual` を返す。
+    期待: get は `manual` を返し、set は `-w` で `latest` を設定する。
+    """
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    server_calls = []
+
+    class FakeResult:
+        def __init__(self, stdout=None, stderr=None, returncode=0):
+            self.stdout = stdout or [""]
+            self.stderr = stderr or [""]
+            self.returncode = returncode
+
+    class FakeServer:
+        def cmd(self, *args):
+            server_calls.append(list(args))
+            if args[:4] == ("show-options", "-w", "-t", "dashboard:0"):
+                return FakeResult(stdout=["window-size manual"])
+            return FakeResult()
+
+    c = config.load_config(None)
+    c.tmux.driver = "libtmux"
+    io = tmuxio.create_from_config(c)
+    io.driver._server = FakeServer()  # type: ignore[attr-defined]
+
+    current = io.get_window_option("dashboard:0", "window-size")
+    io.set_window_option("dashboard:0", "window-size", "latest")
+
+    assert current == "manual"
+    assert ["show-options", "-w", "-t", "dashboard:0", "window-size"] in server_calls
+    assert ["set-option", "-w", "-t", "dashboard:0", "window-size", "latest"] in server_calls
+
+
+def test_libtmux_get_window_option_fail_closed_on_tmux_failure():
+    """目的: libtmux経路の get_window_option が失敗時に fail-closed になることを確認する。
+    前提: show-options が returncode 異常を返す。
+    期待: RuntimeError を送出し、サイレントに空値を返さない。
+    """
+    from tmux_dashboard import tmuxio
+    from tmux_dashboard import config
+
+    class FakeResult:
+        def __init__(self, stdout=None, stderr=None, returncode=0):
+            self.stdout = stdout or [""]
+            self.stderr = stderr or [""]
+            self.returncode = returncode
+
+    class FakeServer:
+        def cmd(self, *args):
+            return FakeResult(returncode=1)
+
+    c = config.load_config(None)
+    c.tmux.driver = "libtmux"
+    io = tmuxio.create_from_config(c)
+    io.driver._server = FakeServer()  # type: ignore[attr-defined]
+
+    with pytest.raises(RuntimeError):
+        io.get_window_option("dashboard:0", "window-size")
 
 
 def test_libtmux_window_target_resolution(monkeypatch):

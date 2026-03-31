@@ -18,6 +18,7 @@ class FakeIO:
         self._width = width
         self._height = height
         self.set_window_option_calls = []
+        self.get_window_option_calls = []
         self.set_title_calls = []
         self.split_calls = []
         self.kill_calls = 0
@@ -39,6 +40,7 @@ class FakeIO:
         self._details_by_window = {}
         self._pane_to_window = {}
         self._pane_titles = {}
+        self._window_options = {}
         self._next_pane_num = 100
 
         self._init_window("dashboard:0", panes)
@@ -50,6 +52,7 @@ class FakeIO:
             self._pane_to_window[pane_id] = window_target
             self._pane_titles.setdefault(pane_id, "")
         self._details_by_window[window_target] = details
+        self._window_options.setdefault(window_target, {"window-size": "manual"})
 
     def _new_pane_id(self) -> str:
         self._next_pane_num += 1
@@ -79,6 +82,11 @@ class FakeIO:
 
     def set_window_option(self, window_target: str, key: str, value: str):
         self.set_window_option_calls.append((window_target, key, value))
+        self._window_options.setdefault(window_target, {})[key] = value
+
+    def get_window_option(self, window_target: str, key: str):
+        self.get_window_option_calls.append((window_target, key))
+        return self._window_options.get(window_target, {}).get(key, "")
 
     def set_pane_title(self, pane_id: str, title: str):
         self.set_title_calls.append((pane_id, title))
@@ -632,6 +640,50 @@ def test_zero_sessions_clear_stale_single_pane_title():
     assert plan["sessions"] == []
     assert io.list_panes("dashboard:0") == ["%1"]
     assert io.list_panes_with_titles("dashboard:0") == [("%1", "")]
+
+
+def test_run_once_ensures_window_size_latest_in_preflight():
+    """目的: run_once の preflight で window-size manual を latest に是正することを確認する。
+    前提: dashboard:0 の window-size が manual になっている。
+    期待: run_once 実行後に window-size が latest へ更新される。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(sessions=["dashboard", "alpha", "beta"], width=120, height=40, panes=["%1", "%2"])
+    io._window_options["dashboard:0"]["window-size"] = "manual"
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+    _ = o.run_once(window_target="dashboard:0")
+
+    assert io.get_window_option("dashboard:0", "window-size") == "latest"
+    assert ("dashboard:0", "window-size", "latest") in io.set_window_option_calls
+
+
+def test_ensure_dashboard_window_policy_is_non_intrusive_for_non_dashboard_target():
+    """目的: non-dashboard target では window-size policy 是正を行わないことを確認する。
+    前提: `alpha:0` を run target として扱う。
+    期待: get/set の window-size 操作は呼ばれない。
+    """
+    from tmux_dashboard import orchestrator
+    from tmux_dashboard import config
+
+    io = FakeIO(
+        sessions=["dashboard", "alpha", "beta"],
+        width=120,
+        height=40,
+        panes=["%1", "%2"],
+    )
+    io._init_window("alpha:0", ["%8", "%9"])
+    io._window_options["alpha:0"]["window-size"] = "manual"
+
+    c = config.Config()
+    o = orchestrator.Orchestrator(io=io, cfg=c)
+    o.ensure_dashboard_window_policy("alpha:0")
+
+    assert ("alpha:0", "window-size") not in io.get_window_option_calls
+    assert ("alpha:0", "window-size", "latest") not in io.set_window_option_calls
 
 
 def test_run_once_reapplies_titles_after_respawn_overwrite():

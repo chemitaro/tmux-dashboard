@@ -956,6 +956,82 @@ uv run pytest -q
 
 ---
 
+## 2026-03-31 S06 実装（window-size latest 自動回復）
+
+### 概要
+- `window-size manual` 汚染により outer Terminal resize へ追随しない問題に対して、S06 を実装した。
+- `dashboard` target の window-local option を `latest` に収束させる API / preflight を追加し、wrapper / runner 両経路で自動回復を実装した。
+- review findings に対応し、orchestrator 側の policy 是正は `dashboard:` target のみに限定した（non-dashboard 非侵襲）。
+
+### 実施内容
+- `tmux_dashboard/tmuxio.py`
+  - `CliDriver` / `LibtmuxDriver` に `get_window_option()` を追加した。
+  - `TmuxIO` に `get_window_option()` 委譲 API を追加した。
+  - `show-options -w` が空出力のケースに対して `show-options -w -g -v` を fallback し、`window-size` の有効値を取得できるようにした。
+  - libtmux 経路は fail-closed（`_raise_if_cmd_failed`）を維持した。
+- `tmux_dashboard/orchestrator.py`
+  - `ensure_dashboard_window_policy(window_target)` を追加した。
+  - `run_once()` preflight と cycle end で `window-size latest` を保証するようにした。
+  - review finding 対応として、`window_target.startswith(\"dashboard:\")` の場合のみ policy 是正するガードを追加した。
+- `tmux-dashboard`
+  - visible dashboard window 確定後に `tmux set-option -w -t \"$dashboard_window_target\" window-size latest` を実行する preflight を追加した。
+
+### テスト（Red → Green）
+- 追加/更新:
+  - `tests/test_tmuxio.py`
+    - CLI/libtmux の `get_window_option` / `set_window_option` 契約
+    - libtmux get の fail-closed
+  - `tests/test_orchestrator.py`
+    - `window-size manual` を `latest` へ是正する回帰
+    - non-dashboard target では `window-size` の get/set を呼ばない非侵襲回帰
+  - `tests/test_e2e_tmux.py`
+    - direct runner の manual → latest 自動回復
+    - wrapper の manual → latest 自動回復 + resize 追随
+
+### 実行コマンド / 結果
+```bash
+uv run pytest tests/test_tmuxio.py tests/test_orchestrator.py tests/test_e2e_tmux.py -q
+# 50 passed in 4.54s
+
+uv run pytest -q
+# 111 passed in 4.46s
+```
+
+### 手動検証
+- 独立レポート:
+  - `spec-lite/current/discussions/window-size-latest-manual-validation-20260331.md`
+- 追記内容:
+  - direct runner / wrapper の manual → latest 回復
+  - resize 79 / 191 の追随
+  - EC-010 補強として multi-client 観測（`tmux list-clients -t dashboard`）を追加
+
+### review findings への対応
+- Code review (Major): `ensure_dashboard_window_policy()` の強制対象を `dashboard:` に限定
+  - 対応: `tmux_dashboard/orchestrator.py` に target ガードを追加
+  - 回帰: `tests/test_orchestrator.py::test_ensure_dashboard_window_policy_is_non_intrusive_for_non_dashboard_target`
+- QA (High/Medium): multi-client 条件の説明力不足
+  - 対応: 手動検証レポートへ `tmux list-clients -t dashboard` 観測を追加し、EC-010 の根拠を明記
+  - 自動担保: wrapper/direct の latest 収束 + resize 追随 E2E を維持
+
+### 変更したファイル
+- `tmux_dashboard/tmuxio.py`
+- `tmux_dashboard/orchestrator.py`
+- `tmux-dashboard`
+- `tests/test_tmuxio.py`
+- `tests/test_orchestrator.py`
+- `tests/test_e2e_tmux.py`
+- `spec-lite/current/discussions/window-size-latest-manual-validation-20260331.md`
+- `spec-lite/current/report.md`
+- `spec-lite/current/plan.md`
+
+### コミット
+- 未実施（ユーザーがレビュー / コミットを担当するため）
+
+### QA follow-up
+- QA reviewer から「`resize-window` 直接操作では outer Terminal resize の証明として弱い」「EC-010 の修正後 multi-client 証跡が足りない」という指摘を受けた。
+- 対応として control-mode client を 2 つ attach し、`refresh-client -C` で client 側サイズを更新したときに `dashboard:0` の `window_width` が `79x40` → `191x98` へ追随する手動証跡を追加した。
+- 追加証跡は `spec-lite/current/discussions/window-size-latest-manual-validation-20260331.md` のシナリオ 4 に記録した。
+
 ## 2026-03-31 S05 follow-up（spec review findings 対応）
 
 ### 概要
