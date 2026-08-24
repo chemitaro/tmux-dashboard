@@ -210,6 +210,14 @@ Each TodoWrite item should be a concrete action executable in 15-30 minutes.
 
 ## GitHub Operations (if applicable)
 
+### Commit identity
+
+- commit前に`git var GIT_AUTHOR_IDENT`と`git var GIT_COMMITTER_IDENT`を確認する
+- ユーザーcommitは`chemitaro <84865385+chemitaro@users.noreply.github.com>`を使用する
+- `codex`、`codex-agent`、`Codex Agent`、`@local`、`.invalid`などの仮identityを設定しない
+- 明示されたBot・GitHub・第三者identityは維持し、ユーザーへ付け替えない
+- identityを確定できない場合はcommitせず、ユーザーへ確認する
+
 If working with GitHub repositories:
 
 ```yaml
